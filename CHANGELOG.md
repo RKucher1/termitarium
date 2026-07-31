@@ -37,8 +37,19 @@ Viewer readability and live-stream fixes. No changes to `numbatd` or
   US Central. Rows and the detail pane now render from the parsed epoch in the
   viewer's timezone, and the detail timestamp carries its zone abbreviation.
   The raw JSON still shows the original UTC value.
+- **Enforcement and finding records describe as numbat actually emits them.**
+  Real enforcement records carry `decision: "no_override"` with `mode`,
+  `reason` and a `rule_ids` array; the `deny_rule_id` field in the schema docs
+  does not appear in practice. Monitor-mode decisions now read `Did not
+  intervene (monitor mode): <rule>` rather than echoing raw identifiers,
+  multi-rule records summarise as `<first> +N more`, and findings fall back to
+  `rule_ids` when `rule_id` is absent.
 - Fixed the detail pane's `observed` block ignoring the `command` field, which
   hid shell commands behind the raw JSON.
+- Added `test/viewer-logic.js` — 135 assertions over the description logic,
+  run with `node test/viewer-logic.js`. No dependencies, no build step; it
+  lifts the pure block out of `viewer.html` and fails loudly if that block
+  ever reaches for the DOM or a global.
 
 ## 0.1.0 — 2026-07-31
 

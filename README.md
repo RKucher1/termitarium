@@ -24,6 +24,7 @@ will move; check \`CHANGELOG.md\` for the version this tracks.
 | `numbatd/main.go` | ~150-line Go server that serves the viewer and whitelisted `*.ndjson` over loopback |
 | `prune/numbat-prune` | Retention tool: archive-before-delete, atomic replace, never loses a record |
 | `install.sh` | Per-user install, builds the binary, wires launchd |
+| `test/viewer-logic.js` | Unit tests for the viewer's record-description logic — `node test/viewer-logic.js`, no dependencies |
 
 ## Install
 
