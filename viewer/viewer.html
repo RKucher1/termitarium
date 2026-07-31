@@ -4,9 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>numbat · record viewer</title>
-<!-- Favicon, inlined so the viewer stays a single self-contained file and
-     works from file:// as well as over numbatd. Source: viewer/favicon.svg -->
+<!-- Two icon declarations, because neither alone covers both cases. The inline
+     SVG keeps this file self-contained for file:// use, where there is no
+     server to fetch from. Safari ignores SVG favicons supplied as data: URIs,
+     so numbatd also serves a real PNG at /favicon.ico — that second link is
+     dead over file:// and live over the daemon. Source: viewer/favicon.svg -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22 width=%2232%22 height=%2232%22 role=%22img%22 aria-label=%22Termitarium%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23171310%22/%3E%3Cg shape-rendering=%22crispEdges%22%3E%3Crect x=%226%22 y=%2217%22 width=%224%22 height=%229%22 fill=%22%23C9552B%22/%3E%3Crect x=%2212%22 y=%2211%22 width=%224%22 height=%2215%22 fill=%22%23EDE6DA%22/%3E%3Crect x=%2218%22 y=%227%22 width=%224%22 height=%2219%22 fill=%22%23C9552B%22/%3E%3Crect x=%2224%22 y=%2214%22 width=%223%22 height=%2212%22 fill=%22%23EDE6DA%22/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon.ico">
 <style>
   :root{
     --bark:#171310; --soil:#1F1A16; --ridge:#2A231D; --lift:#352C25;

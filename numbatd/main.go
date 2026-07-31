@@ -1,6 +1,7 @@
 // numbatd — minimal hardened localhost server for the numbat record viewer.
 //
 //   GET  /              the viewer (tools/viewer.html)
+//   GET  /favicon.ico   the viewer icon (tools/favicon.png)
 //   GET  /api/sources   JSON list of *.ndjson files in the numbat dir
 //   GET  /files/{name}  a whitelisted .ndjson file (HEAD supported)
 //
@@ -73,6 +74,28 @@ func viewer(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, p)
 }
 
+// favicon serves a real image file. Safari ignores SVG favicons supplied as
+// data: URIs, so the inline icon in viewer.html covers file:// use and this
+// covers everything served over the daemon.
+//
+// The served path is a compile-time constant joined to -dir: no part of the
+// request reaches the filesystem, so traversal is impossible by construction
+// rather than by filtering. It sits behind guard() like every other route,
+// which supplies the Host check, the GET/HEAD restriction, and nosniff.
+func favicon(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/favicon.ico" {
+		http.NotFound(w, r)
+		return
+	}
+	p := filepath.Join(dir, "tools", "favicon.png")
+	if _, err := os.Stat(p); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	http.ServeFile(w, r, p)
+}
+
 func sources(w http.ResponseWriter, r *http.Request) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -139,6 +162,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", guard(viewer))
+	mux.HandleFunc("/favicon.ico", guard(favicon))
 	mux.HandleFunc("/api/sources", guard(sources))
 	mux.HandleFunc("/files/", guard(files))
 

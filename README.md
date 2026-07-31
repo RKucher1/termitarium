@@ -25,7 +25,9 @@ will move; check \`CHANGELOG.md\` for the version this tracks.
 | `prune/numbat-prune` | Retention tool: archive-before-delete, atomic replace, never loses a record |
 | `install.sh` | Per-user install, builds the binary, wires launchd |
 | `tools/gen-rule-catalog.js` | Maintainer tool: regenerates the viewer's embedded rule catalog from numbat's rule YAML. Never needed at runtime |
+| `tools/gen-favicon.py` | Maintainer tool: regenerates `viewer/favicon.png` from the same geometry as the SVG |
 | `test/viewer-logic.js` | Unit tests for the viewer's description and interpretation logic — `node test/viewer-logic.js`, no dependencies |
+| `test/install-logic.sh` | Tests for `install.sh`: legacy migration, idempotency, uninstall — `bash test/install-logic.sh` |
 
 ## Install
 
@@ -95,11 +97,18 @@ Virtualized rendering, chunked parsing, and a cached lowercase index per record
 keep it responsive on large files. All output is HTML-escaped — agent command
 text is untrusted input.
 
-The description and interpretation logic is pure and unit-tested:
+The description and interpretation logic is pure and unit-tested, and the
+installer has its own suite:
 
 ```sh
-node test/viewer-logic.js
+node test/viewer-logic.js     # viewer logic
+bash test/install-logic.sh   # install, migration, uninstall
 ```
+
+The installer tests run against a sandbox `HOME` **and** override the launchd
+labels, because `launchctl` is not scoped by `HOME` — without fake labels a
+test running `--uninstall` would unload the agents on the developer's own
+machine.
 
 ### Per-finding interpretation
 
@@ -157,6 +166,11 @@ hostile pages in your browser*.
   a localhost service.
 - **No CORS headers, ever.** A malicious page can send a request to 127.0.0.1
   but the browser will not let it read the response.
+- **Fixed-path icon.** `/favicon.ico` serves `tools/favicon.png` and nothing
+  else. The path is a compile-time constant, so no part of the request reaches
+  the filesystem — traversal is impossible by construction, not by filtering.
+  It sits behind the same Host check, method restriction, and `nosniff` header
+  as every other route.
 - **Whitelist serving.** Only `[A-Za-z0-9._-]*.ndjson` in the data directory,
   with symlink resolution checked against the root. No directory listing.
   GET/HEAD only.

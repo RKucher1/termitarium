@@ -679,7 +679,7 @@ var gen = require(path.join(__dirname, "..", "tools", "gen-rule-catalog.js"));
     'back`tick and ${interpolation}',
     'quote " and backslash \\ and newline \n',
     'line' + LS + 'sep' + PS + 'end',
-    '  control chars'
+    String.fromCharCode(0,31) + " control chars"
   ];
   cases.forEach(function(s, i){
     var out = gen.jsonSafe(s);
@@ -836,11 +836,48 @@ var gen = require(path.join(__dirname, "..", "tools", "gen-rule-catalog.js"));
 
 /* ── invariants the viewer depends on ───────────────────────────────────── */
 
-ok("the viewer declares its own icon so the browser does not probe /favicon.ico",
+// Two icon declarations, because neither covers both delivery modes. The
+// inline SVG is the only one that works over file://, where there is no server
+// to fetch from; Safari ignores SVG favicons supplied as data: URIs, so it
+// needs the real PNG that numbatd serves at /favicon.ico.
+ok("the viewer inlines an SVG icon for file:// use",
    /<link rel="icon" href="data:image\/svg\+xml,/.test(HTML));
-ok("the icon is inlined rather than referencing a sibling file",
+ok("the viewer also points at the PNG numbatd serves",
+   /<link rel="icon" type="image\/png"[^>]*href="\/favicon\.ico">/.test(HTML),
+   "Safari will not use the data: URI icon");
+ok("the SVG icon is inlined rather than referencing a sibling file",
    HTML.indexOf('rel="icon" href="viewer/favicon.svg"') === -1 &&
    HTML.indexOf('rel="icon" href="favicon.svg"') === -1);
+
+// The PNG the daemon serves must actually be a PNG, or /favicon.ico 404s and
+// Safari silently falls back to its generated placeholder.
+(function(){
+  var p = path.join(__dirname, "..", "viewer", "favicon.png"), buf;
+  try { buf = fs.readFileSync(p); }
+  catch(e){ failures.push("viewer/favicon.png is missing — numbatd's /favicon.ico would 404"); return; }
+  eq("favicon.png has a PNG signature", buf.slice(0, 8).toString("latin1"), "\x89PNG\r\n\x1a\n");
+  // Check the length before reading the IHDR, or a truncated file throws
+  // ERR_OUT_OF_RANGE and takes every later assertion down with it.
+  if(buf.length < 24){
+    failures.push("favicon.png is too short to contain an IHDR (" + buf.length + " bytes)");
+    return;
+  }
+  eq("favicon.png is 32 wide",  buf.readUInt32BE(16), 32);
+  eq("favicon.png is 32 high",  buf.readUInt32BE(20), 32);
+  ok("favicon.png is small enough to be inconsequential", buf.length < 4096, buf.length + " bytes");
+})();
+
+// Literal control bytes make `file` classify this source as binary, which makes
+// grep skip it silently — a search that finds nothing then looks identical to a
+// search that refused to look. Build such fixtures with String.fromCharCode.
+(function(){
+  var src = fs.readFileSync(__filename, "utf8"), bad = 0;
+  for(var i = 0; i < src.length; i++){
+    var c = src.charCodeAt(i);
+    if((c < 32 && c !== 10 && c !== 13 && c !== 9) || c === 127) bad++;
+  }
+  eq("this test file contains no literal control characters", bad, 0);
+})();
 
 ok("the virtual-scroll row height is unchanged", /var ROW = 29\b/.test(HTML),
    "ROW must stay 29 — the list geometry is computed from it");

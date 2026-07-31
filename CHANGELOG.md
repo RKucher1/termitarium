@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.4.0 — 2026-07-31
+
+Installer correctness, a real favicon, and the bugs found looking for more of
+the same failure.
+
+- **The repo could not be installed.** `install.sh` builds `numbatd` with
+  `go build`, but there was no `go.mod` anywhere in the tree, and Go 1.16+
+  refuses to build outside a module. Every fresh clone failed at the build
+  step — in the exact command the README tells people to run. Added
+  `numbatd/go.mod`.
+- **`/favicon.ico`, served for real.** Safari ignores SVG favicons supplied as
+  `data:` URIs, so the inlined icon left it showing a generated placeholder.
+  numbatd now serves a 163-byte PNG at a fixed path. The viewer declares both:
+  the inline SVG is the only one that works over `file://`, the PNG is the only
+  one Safari will use. The route joins a compile-time constant to `-dir`, so no
+  part of the request reaches the filesystem, and it sits behind the same Host
+  check, GET/HEAD restriction and `nosniff` header as everything else.
+  `tools/gen-favicon.py` regenerates the PNG from the SVG's geometry.
+- **Migration off the old launchd labels.** An install from before the rename
+  left `com.numbat-tools.*` agents behind. Installing again would not have
+  replaced them — it would have stacked a second daemon on the same port, and
+  `--uninstall` would have removed the new pair while leaving the old one
+  running. `install.sh` now unloads and removes the legacy pair before bringing
+  the new agents up, says so when it does, and `--uninstall` covers both sets.
+- **`launchctl load` lies.** Loading an already-loaded agent prints
+  `Load failed: 5: Input/output error` and still exits 0, so the plist on disk
+  changed while launchd kept the old definition and the script reported success.
+  Reloads now use `bootout`/`bootstrap`, which return honest exit codes, with
+  the legacy pair as a fallback — and neither is trusted: the result is
+  re-checked against `launchctl list`.
+- **A check that only failed when the answer was yes.** `is_loaded` was
+  `launchctl list | grep -q`. Under `set -o pipefail`, `grep -q` exits at the
+  first match, `launchctl` dies of SIGPIPE, and the pipeline returns 141 — so a
+  loaded agent reported as missing. It is a here-string now.
+- **Install verifies instead of announcing.** It checks the daemon by asking it
+  to serve, the prune agent by asking launchd whether it registered, and the
+  icon by fetching it; it exits non-zero if any of them failed. It no longer
+  prints "installing fish function" on machines with no fish config, and
+  confirms the file was written before claiming it installed one.
+- **`--uninstall` finishes the job.** It removes the fish function and the icon
+  as well as the binaries and plists, covers legacy labels, and refuses to
+  report success while any of its agents are still loaded.
+- Added `test/install-logic.sh` — 37 checks over migration ordering, idempotency,
+  uninstall coverage, the build, and the icon. The suite overrides the launchd
+  labels: `launchctl` is not scoped by `HOME`, so a sandboxed `HOME` does not
+  sandbox launchd, and an earlier version of these tests took the live daemon
+  down. It now asserts the real agent is still running when it finishes.
+- Removed two literal control bytes from `test/viewer-logic.js`. They made
+  `file` classify the source as binary, which made `grep` skip it silently — a
+  search that finds nothing looked exactly like a search that refused to look.
+- Viewer assertions now cover both icon declarations and the PNG's validity;
+  304 assertions total.
+
 ## 0.3.0 — 2026-07-31
 
 Per-finding interpretation. No changes to `numbatd` or `numbat-prune`.
