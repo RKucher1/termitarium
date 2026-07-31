@@ -62,6 +62,9 @@ var describe  = loadBlock("describe",  ["describe"]).describe;
 var interpret = loadBlock("interpret", ["interpret"]).interpret;
 var rollup    = loadBlock("rollup",    ["rollup"]).rollup;
 
+var sizeBlock = loadBlock("sizeguard", ["MAX_BYTES", "overSize", "hdrSize"]);
+var MAX_BYTES = sizeBlock.MAX_BYTES, overSize = sizeBlock.overSize, hdrSize = sizeBlock.hdrSize;
+
 var catBlock  = loadBlock("rulecat", ["RULECAT", "RULECAT_META"]);
 var RULECAT   = catBlock.RULECAT;
 var RULECAT_META = catBlock.RULECAT_META;
@@ -1421,6 +1424,54 @@ function noteMatching(r, re){
 ok("the rollup block does not reference the DOM or viewer globals",
    !/\bdocument\b|\bwindow\b|\brecs\b|\bRULECAT\b|\bview\b/.test(blockSrc("rollup")),
    "rollup() must stay self-contained so it can be lifted and tested alone");
+
+/* ── size guard ─────────────────────────────────────────────────────────── */
+(function(){
+  // The whole point of the limit: it has to sit BELOW the engine's maximum
+  // string length, or it can never fire before the load fails on its own. V8
+  // stops at 2^29-24. A limit above that is the bug this guard replaced.
+  var V8_MAX_STRING = Math.pow(2,29) - 24;
+  ok("MAX_BYTES sits below V8's maximum string length",
+     MAX_BYTES < V8_MAX_STRING,
+     "MAX_BYTES=" + MAX_BYTES + " must be < " + V8_MAX_STRING + ", or the guard cannot fire first");
+  ok("MAX_BYTES is still large enough to be useful", MAX_BYTES > 256*1024*1024);
+
+  eq("overSize() refuses a size past the limit", overSize(MAX_BYTES + 1), true);
+  eq("overSize() accepts a size exactly at the limit", overSize(MAX_BYTES), false);
+  eq("overSize() accepts an ordinary size", overSize(6499880), false);
+  eq("overSize() accepts zero", overSize(0), false);
+
+  // An unknown size must never be treated as a refusal: the caller cannot act
+  // on what it was not told, and the load's own failure path still covers it.
+  eq("overSize() does not refuse an unknown size", overSize(null), false);
+  eq("overSize() does not refuse an undefined size", overSize(undefined), false);
+  eq("overSize() does not refuse a numeric string", overSize(String(MAX_BYTES + 1)), false);
+  eq("overSize() does not refuse NaN", overSize(NaN), false);
+  eq("overSize() does not refuse Infinity", overSize(Infinity), false);
+
+  eq("hdrSize() parses a plain Content-Length", hdrSize("6499880"), 6499880);
+  eq("hdrSize() tolerates surrounding whitespace", hdrSize("  6499880 "), 6499880);
+  eq("hdrSize() reads zero as zero, not as absent", hdrSize("0"), 0);
+  eq("hdrSize() rejects an absent header", hdrSize(null), null);
+  eq("hdrSize() rejects a non-string", hdrSize(123), null);
+  eq("hdrSize() rejects a negative length", hdrSize("-1"), null);
+  eq("hdrSize() rejects a float", hdrSize("1.5"), null);
+  eq("hdrSize() rejects a hex-looking value", hdrSize("0x10"), null);
+  eq("hdrSize() rejects junk", hdrSize("banana"), null);
+  eq("hdrSize() rejects an empty header", hdrSize(""), null);
+  // A multi-value Content-Length is a request-smuggling shape; refusing to
+  // guess is the only safe reading.
+  eq("hdrSize() rejects a duplicated header value", hdrSize("100, 100"), null);
+
+  // The two compose on the served path: header in, refusal out.
+  eq("an oversized served stream is refused", overSize(hdrSize(String(MAX_BYTES + 1))), true);
+  eq("a normal served stream is not", overSize(hdrSize("6499880")), false);
+  eq("a chunked response with no header is not refused", overSize(hdrSize(null)), false);
+})();
+
+ok("the sizeguard block does not reference the DOM or viewer globals",
+   !/\bdocument\b|\bwindow\b|\brecs\b|\bfetch\b|\bfmtB\b|\btoast\b/.test(blockSrc("sizeguard")),
+   "the size guard must stay self-contained so it can be lifted and tested alone");
 
 /* ── report ─────────────────────────────────────────────────────────────── */
 

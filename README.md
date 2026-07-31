@@ -109,11 +109,13 @@ streaming it live.
   Rather than invent a verdict the rollup reports what was proposed and what
   was observed, names the gaps, and leaves the judgement to you. A command with
   no matching result is reported as *no result was recorded* — never as a
-  failure. The one real failure signal is the `tool_error` tag, which numbat
-  sets only from a field the agent itself used to mark failure; the rollup
-  counts it and states plainly that its absence on the others is not evidence
-  they succeeded. Nothing in the pane is green, because nothing in it can
-  certify that a session was clean.
+  failure. The one real failure signal is the `tool_error` tag; on the hook path
+  these records come from, numbat sets it only from a field the agent itself
+  used to mark failure. (Records arriving over OTLP can also earn it from log
+  severity, which is a weaker signal.) The rollup counts the tag and states
+  plainly that its absence on the others is not evidence they succeeded.
+  Nothing in the pane is green, because nothing in it can certify that a
+  session was clean.
 
   Session boundaries are counted rather than collapsed to a flag, because they
   are not unique. numbat maps `SubagentStart`/`SubagentStop` onto
@@ -203,9 +205,13 @@ used under the Apache License 2.0.
 ## Security posture
 
 The threat model for a localhost service is *other processes on the machine and
-hostile pages in your browser*.
+hostile pages in your browser*. The bullets below cover hostile pages, and they
+bound what a local process can reach — but nothing here identifies a local
+caller. See the last bullet before running this on a machine you share.
 
-- **Loopback only.** Refuses at startup to bind anything else.
+- **Loopback only.** Refuses at startup to bind anything whose host isn't
+  `127.0.0.1`, `localhost`, or `::1`. `localhost` is a name your resolver
+  controls, so this is a guardrail rather than a sandbox.
 - **Host-header validation.** Requests whose `Host` is not a loopback name get
   403. This closes DNS rebinding — the one practical way a remote site reaches
   a localhost service.
@@ -223,11 +229,19 @@ hostile pages in your browser*.
   `~/.termitarium`. Redeploying the viewer into `~/.numbat` matched numbat's
   own `tamper.detector_state_write` rule every time, so routine deploys
   generated most of the findings and trained you to ignore that rule.
-- **Whitelist serving.** Only `[A-Za-z0-9._-]*.ndjson` in the data directory,
-  with symlink resolution checked against the root. No directory listing.
-  GET/HEAD only.
-- **No authentication, deliberately.** Any process running as you can already
-  read the data directory off disk; a token would be ceremony, not a boundary.
+- **Whitelist serving.** Only `^[A-Za-z0-9][A-Za-z0-9._-]*\.ndjson$` in the
+  data directory, with symlink resolution checked against the root. No
+  directory listing. GET/HEAD only.
+- **No authentication — which widens access, so read this one.** There is no
+  token and no check on *who* is connecting; a loopback port is reachable by
+  every user on the machine, not just you. numbat writes its records `0600`, so
+  on disk they are owner-only; starting `numbatd` makes them readable by any
+  local process that can open a socket. The whitelist still applies — a local
+  caller gets `*.ndjson` inside `-dir` and nothing else — but that is every
+  record file. Fair trade on a single-user machine, bad one otherwise:
+  **don't run this on a box you share.** There is no peer-uid check available
+  for a TCP listener; the only real fix is to move it to a Unix-domain socket
+  with `0600` permissions.
 
 Idle footprint is one ~6 MB process.
 
@@ -253,13 +267,19 @@ Guarantees, each verified against a fixture containing malformed lines, records
 with no timestamp, and records with unparseable timestamps:
 
 - Records with no parseable timestamp are always kept.
-- Malformed lines are always kept, preserved verbatim.
+- Malformed lines are always kept. Content is never dropped or edited, but a
+  line is not guaranteed byte-identical: the file is read and rewritten as
+  UTF-8 with undecodable bytes replaced, line endings normalise to `\n`, and a
+  missing final newline is added. Blank lines are dropped and excluded from the
+  counts below.
 - Archiving happens **before** removal; if it fails, the original is untouched.
 - Replace is atomic (`os.replace` on a same-directory temp file).
 - Permissions are preserved. Idempotent. Kept + archived always equals the
   original record count.
 
-numbat itself never rotates its output, so something has to.
+numbat's hook capture only appends and never rotates, so something has to.
+(`numbat scan --output file --output-file PATH` is the one path that truncates,
+and it does so on every run.)
 
 ### Race with live hooks
 

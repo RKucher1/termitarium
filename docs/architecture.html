@@ -272,7 +272,7 @@
   <div class="wrap">
     <div class="eyebrow">The security boundary</div>
     <h2 class="sec-title">A localhost port is reachable from every tab you have open.</h2>
-    <p class="sec-lede">That's the actual threat model — not the network, but the browser. A page on any site can send requests to 127.0.0.1. Two mechanisms decide what happens next, and neither is authentication.</p>
+    <p class="sec-lede">A page on any site can send requests to 127.0.0.1, and so can every other user on the machine. Two mechanisms decide what happens next, and neither is authentication. They answer the browser half well; the local half is answered only by not running this where you don't trust the other logins — see <em>Auth</em>, below.</p>
 
     <div class="gates">
       <div class="gate allow">
@@ -297,17 +297,17 @@
       <div class="card">
         <span class="tick">Bind</span>
         <h3>Loopback or nothing</h3>
-        <p>The daemon parses its own listen address at startup and exits if it isn't 127.0.0.1. You cannot misconfigure it onto a network interface, even deliberately, without editing the source.</p>
+        <p>The daemon parses its own listen address at startup and exits unless the host is <code>127.0.0.1</code>, <code>localhost</code>, or <code>::1</code>. Nothing routable gets past it by accident. <code>localhost</code> is a name rather than an address, so an operator who rewrites their own resolver can still land it elsewhere — this is a guardrail, not a sandbox.</p>
       </div>
       <div class="card">
         <span class="tick">Path</span>
         <h3>Whitelist, not blacklist</h3>
-        <p>Filenames must match <code>[A-Za-z0-9._-]*.ndjson</code>, then the resolved real path must still sit inside the data directory. Traversal and planted symlinks both fail closed. No directory listing exists.</p>
+        <p>Filenames must match <code>^[A-Za-z0-9][A-Za-z0-9._-]*\.ndjson$</code>, then the resolved real path must still sit inside the data directory. Traversal and planted symlinks both fail closed. No directory listing exists.</p>
       </div>
       <div class="card">
         <span class="tick">Auth</span>
-        <h3>Deliberately absent</h3>
-        <p>Any process running as you can already read <code>~/.numbat</code> straight off disk. A token would add ceremony without adding a boundary. The boundaries that exist — other users, other machines, hostile pages — are covered above.</p>
+        <h3>Absent — and that widens the file</h3>
+        <p>There is no authentication and nothing that <em>identifies</em> a caller. The gates above still constrain a local one — it gets <code>*.ndjson</code> inside <code>-dir</code> and nothing else — but that is every record file, and a loopback port is open to every user on the machine. numbat writes records <code>0600</code>, so the daemon takes a file only you can read and serves it to any local process that can open a socket. On a single-user machine that costs nothing. <strong>On a shared machine, don't run it</strong> — a TCP listener has no peer-uid check to add, so the real fix is a Unix-domain socket with <code>0600</code> permissions.</p>
       </div>
     </div>
   </div>
@@ -368,7 +368,7 @@
 <section id="prune">
   <div class="wrap">
     <div class="eyebrow">Retention</div>
-    <h2 class="sec-title">numbat never rotates its own output. Something has to.</h2>
+    <h2 class="sec-title">numbat's hook capture only ever appends. Something has to rotate it.</h2>
     <p class="sec-lede">The order of operations is the entire design. Archive first, swap atomically, and treat anything you cannot confidently date as something to keep.</p>
 
     <div class="swap">
@@ -392,7 +392,7 @@
       <div class="card">
         <span class="tick">Kept always</span>
         <h3>Anything undateable</h3>
-        <p>Records with no timestamp field, records whose timestamp won't parse, and malformed lines that aren't valid JSON are all retained verbatim. A retention tool that silently destroys what it can't read is worse than no retention tool.</p>
+        <p>Records with no timestamp field, records whose timestamp won't parse, and malformed lines that aren't valid JSON are all retained. Content is never dropped or edited, though a line is not guaranteed byte-identical — the file is rewritten as UTF-8 with undecodable bytes replaced and line endings normalised, and blank lines are dropped. A retention tool that silently destroys what it can't read is worse than no retention tool.</p>
       </div>
       <div class="card">
         <span class="tick">Archived</span>
@@ -402,7 +402,7 @@
       <div class="card">
         <span class="tick">Verified</span>
         <h3>Counted end to end</h3>
-        <p>Kept plus archived always equals the original record count. That invariant is asserted against a fixture seeded with malformed lines, undated records, and garbage timestamps.</p>
+        <p>Kept plus archived always equals the original record count — blank lines are not records and are excluded from both sides. That invariant is asserted against a fixture seeded with malformed lines, undated records, and garbage timestamps.</p>
       </div>
     </div>
   </div>
@@ -417,7 +417,7 @@
     <div class="limits">
       <div class="limit">
         <h3>Whole file in memory</h3>
-        <p>The viewer loads the entire stream before rendering. A guard rejects files past 900 MB with a message rather than hanging the tab. Prune regularly and this never comes up.</p>
+        <p>The viewer loads the entire stream into one string before rendering, and engines cap how long a string may be — V8 stops 24 bytes short of 512 MiB. The limit is 480 MiB, deliberately below that ceiling so the viewer can refuse with a message instead of failing on a <code>RangeError</code>. Both paths check it: a file you open by hand against its own size, a stream numbatd serves against its <code>Content-Length</code>, before a byte of the body is read. A response that carries no length is not refused, since a guess would be worse than none. Prune regularly and none of this comes up.</p>
       </div>
       <div class="limit">
         <h3>Prune races live hooks</h3>

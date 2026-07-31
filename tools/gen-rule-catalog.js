@@ -27,9 +27,14 @@
 //   3. The emitted block is re-parsed and deep-compared against the source
 //      objects. Any escaping bug fails the build instead of shipping.
 //
-// Rule files are read as text only. Nothing is require()d, eval()d or
+// Rule files are read as text only. No rule content is require()d, eval()d or
 // executed, symlinks are refused, and no path outside --rules-dir is read.
 // There are no dependencies and no network access.
+//
+// One caveat, since this sits under a SECURITY header: provenance is read by
+// running `git` inside --rules-dir (fixed argv, no shell, no rule text reaches
+// the call). Git honours repository-supplied config, so point this at a repo
+// you trust. It is a maintainer-only tool.
 
 "use strict";
 

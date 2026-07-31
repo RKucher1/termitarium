@@ -1,5 +1,109 @@
 # Changelog
 
+Releases 0.2.0 through 0.5.0 were tagged retroactively, after the fact, at the
+commit where each version's notes below were completed. Only `v0.1.0` was
+tagged at the time.
+
+## Unreleased
+
+Corrections to the public surface, found by re-reading it against the code
+rather than against the previous draft.
+
+- **The viewer no longer claims a proposed command ran.** `describe()` rendered
+  `command.exec` as *Ran a shell command* while `interpret()`, one pane away
+  about the same record, said numbat saw it before it ran and cannot show
+  whether it executed. It says *Proposed* now. Alongside: `dsDur()` cascaded
+  from minutes to nothing, showing a four-hour command as "267 min" while the
+  rollup called the same span "4h 27m"; map keys built from record content were
+  unbounded, so one record with a 300 KB `source_agent` inflated the pane; and
+  the header record count could exceed the sum of the grid because
+  `permission.requested` and `network.indicator` had no cell — they are counted
+  as *other records*, and the parts now sum to the whole, asserted in the tests.
+- **Three false statements in the walkthrough**, untrue against numbat v0.1.1: a
+  token count on `prompt.user` (numbat records none, anywhere), a
+  `config.change` event type (the vocabulary has `config.agent` and
+  `config.mcp`, and a `settings.json` edit arrives as `file.write`), and "five
+  record types" with an exhaustive five-way decoder — there are six, and a
+  parser written from that sentence falls through on `diagnostic`. The sample
+  stream also advertised `exit 0`, the one field a hook-captured
+  `command.result` almost never carries.
+- **The architecture diagram described a shape the daemon outgrew** — three
+  routes and one directory, when numbatd answers four across two. It also
+  gained the two limits that matter most and were absent: that success is not
+  in the data, and that subagents are not separate sessions. Separately, the
+  README told every reader to run `nb`, a fish function written only when
+  `~/.config/fish` exists, so the install block ended on a command most readers
+  could not run.
+
+Below: one behaviour change — the size guard, which the sweep found by checking
+a documented promise against the code and discovering the promise was the only
+part that existed — and the documentation corrections that came with it.
+
+- **The security posture claimed a boundary that does not exist.** The
+  architecture page stated that "other users" were among the boundaries covered
+  by the daemon's gates. They are not. `numbatd` has no authentication and no
+  peer-credential check — the whole request gate is a Host-header match and a
+  method restriction — and a loopback port is reachable by every uid on the
+  machine. numbat writes its records `0600`, so starting the daemon *widens*
+  access to files that were owner-only on disk. The argument that "any process
+  running as you can already read it off disk" was true of the premise and
+  false of the conclusion. Both the README and the architecture page now say
+  plainly that this is a single-user-machine tool. The correction is careful in
+  the other direction too: the whitelist, symlink and method checks do still
+  bound a local caller to `*.ndjson` inside `-dir` — what is missing is any
+  notion of *who* is asking. The suggested remedy is a Unix-domain socket,
+  since a TCP listener has no peer-uid to check.
+- **The size guard now runs on the path everyone uses, and at a limit that can
+  actually fire.** The architecture page promised that files past 900 MB are
+  rejected "rather than hanging the tab." Two things were wrong. `MAX_BYTES` was
+  only checked on the file-picker path — `loadURL()` and the live-poll refresh,
+  which is how the viewer loads on open and on every arrival, fetched and
+  buffered the whole response with no size check at all, though `/api/sources`
+  had already reported the size. And 900 MB sits *above* V8's maximum string
+  length of 2^29-24 bytes, so even on the path it guarded it could not fire
+  before the engine did. The limit is now 480 MiB, below that ceiling by
+  construction and asserted so in the tests; both served paths check
+  `Content-Length` before reading a byte of the body, and a response carrying no
+  length is not refused, because a guess is worse than none. Extracted as a
+  `[sizeguard]` block with `overSize()` and `hdrSize()`, pure and lifted into
+  the unit tests like `describe()`, `interpret()` and `rollup()` before it.
+  Verified by execution against a real 500 MB stream served by `numbatd` — a
+  size that is under V8's ceiling and over the new limit, so it is exactly the
+  case the old guard let through and the tab died on.
+- **`confidence` was described wrongly in the walkthrough**, in two places, and
+  contradicted this repo's own README — which had it right. numbat grades how
+  *directly* evidence backs an observation; only `low` concerns parse quality.
+  "Parser certainty" was the 0.2.0 wording, retired in 0.3.0 in the README and
+  never carried across to the walkthrough.
+- **Ambiguity does not uniformly suppress a deny.** The walkthrough listed
+  "missing sequence state" alongside decode errors and panics as something that
+  suppresses enforcement. numbat does the opposite deliberately: unavailable
+  state skips sequence rules and lets an otherwise clean stateless deny through.
+  An operator reading the old sentence would have expected to be let past.
+- **"numbat never rotates or truncates its own output"** is true of the hook
+  capture and false as a blanket statement — `numbat scan --output file
+  --output-file PATH` truncates `PATH` on every run. Corrected at all four
+  sites, one of which the first pass of this sweep missed.
+- Smaller overstatements corrected: `tool_error` is set only from an
+  agent-supplied field *on the hook path*, but can be inferred from log
+  severity over OTLP; the bind check accepts `localhost` and `::1`, not just
+  `127.0.0.1`, and `localhost` is a name the resolver controls, so "you cannot
+  misconfigure it even deliberately" was too strong — the same overclaim was in
+  `numbatd/main.go`'s own header comment; the HTTP sink retries on the next
+  write after 30 seconds rather than on a background timer, and drops under
+  buffer pressure rather than "retrying once"; `tamper.detector_state_write`
+  matches enumerated write patterns rather than "anything that writes"; prune
+  keeps malformed lines but re-encodes as UTF-8 with replacement and normalises
+  line endings, so it is not byte-identical and "verbatim" had to go; blank
+  lines are dropped and excluded from the kept-plus-archived invariant, which
+  the architecture page stated without that qualification; `numbat collect` is
+  a long-running receiver, so "not a daemon" became "no daemon by default"; and
+  the whitelist regex quoted in the docs was looser than the one in the code.
+- `tools/gen-rule-catalog.js` said "nothing is require()d, eval()d or executed"
+  under a SECURITY header while shelling out to `git` three times for
+  provenance. No rule content reaches those calls, but git honours
+  repository-supplied config, so the claim is now scoped and the caveat stated.
+
 ## 0.5.0 — 2026-07-31
 
 Session rollup. A finding explains itself and an event explains itself; a

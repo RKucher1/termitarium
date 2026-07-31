@@ -10,7 +10,8 @@
 // numbat watches for tampering.
 //
 // Security posture:
-//   * binds 127.0.0.1 only
+//   * binds loopback only (127.0.0.1, localhost, or ::1); refuses at startup
+//   * no authentication: every local uid can read the records this serves
 //   * Host header must be a loopback host (defeats DNS rebinding)
 //   * no CORS headers ever (browser pages cannot read responses)
 //   * filename whitelist, no path traversal, no directory listing

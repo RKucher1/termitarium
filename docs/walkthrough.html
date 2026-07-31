@@ -297,7 +297,7 @@
     <div class="verdict">
       <span>Not a <b>SaaS</b></span>
       <span>Not a <b>proxy</b></span>
-      <span>Not a <b>daemon</b></span>
+      <span>No <b>daemon</b> by default</span>
       <span>No <b>account</b>, no <b>telemetry home</b></span>
       <span>Blocking is <b>off by default</b></span>
     </div>
@@ -532,7 +532,7 @@ numbat hook install --agent claude --emit all \
   <div class="wrap">
     <div class="eyebrow">Where the logs live</div>
     <h2 class="sec-title">One NDJSON stream. Six record types. Click a field.</h2>
-    <p class="sec-lede">Default paths sit under <code>~/.numbat/</code>: <code>findings.ndjson</code> if you only asked for findings, <code>records.ndjson</code> once you add events or indicators. numbat never rotates these files — retention is yours. Below is a finding of the shape you'd get if an agent read a secrets file and then proposed an upload.</p>
+    <p class="sec-lede">Default paths sit under <code>~/.numbat/</code>: <code>findings.ndjson</code> if you only asked for findings, <code>records.ndjson</code> once you add events or indicators. numbat only appends to these files and never rotates them — retention is yours. Below is a finding of the shape you'd get if an agent read a secrets file and then proposed an upload.</p>
 
     <div class="anatomy">
       <div class="record" id="record">
@@ -563,7 +563,7 @@ numbat hook install --agent claude --emit all \
     </div>
 
     <div class="callout">
-      <p><strong>The trap in that record:</strong> <code>confidence</code> is not "how likely is this malicious." It's how sure the parser is that it read the source correctly. A high-severity, high-confidence finding still only means a rule matched a proposed action — pre-action hooks fire <em>before</em> the thing happens, so a finding never proves the command ran.</p>
+      <p><strong>The trap in that record:</strong> <code>confidence</code> is not "how likely is this malicious." It grades how <em>directly</em> evidence backs the observation — <code>high</code> is a durable artifact like a transcript line, <code>medium</code> is inferred from a command or path shape, <code>low</code> is a weak signal or a tolerant parse. Hook records are capped at <code>medium</code> no matter how cleanly they parsed, because the evidence is the agent's own report. A high-severity, high-confidence finding still only means a rule matched a proposed action — pre-action hooks fire <em>before</em> the thing happens, so a finding never proves the command ran.</p>
     </div>
   </div>
 </section>
@@ -589,7 +589,7 @@ numbat hook install --agent claude --emit all \
     <div class="rules" id="rules"></div>
 
     <div class="callout">
-      <p><strong>Expect noise on your boxes specifically.</strong> An autonomous fleet running with reduced approval modes will trip <code>tamper.guardrails_off</code> and <code>exec.agent_runtime_bypass_flags</code> constantly. Governance work that edits hooks and settings trips <code>tamper.agent_config_write</code>. Anything that writes into <code>$HOME/.numbat</code> trips <code>tamper.detector_state_write</code> — including your own tooling, if you deploy into that directory. Six of the nine findings on this author’s machine were his own deploys; keep companion tooling out of the watched directory rather than suppressing the rule. Baseline with a full <code>scan</code> first, see what fires against normal operation, then decide which rules to disable by ID before you ever consider enforce mode.</p>
+      <p><strong>Expect noise on your boxes specifically.</strong> An autonomous fleet running with reduced approval modes will trip <code>tamper.guardrails_off</code> and <code>exec.agent_runtime_bypass_flags</code> constantly. Governance work that edits hooks and settings trips <code>tamper.agent_config_write</code>. Writes and deletes under <code>$HOME/.numbat</code> trip <code>tamper.detector_state_write</code> — including your own tooling, if you deploy into that directory. (It matches <code>file.write</code>/<code>file.delete</code> under literal home roots, plus shell redirects and an enumerated list of mutators; it is not a catch-all, and it does not infer a custom <code>--state-db</code> path.) Six of the nine findings on this author’s machine were his own deploys; keep companion tooling out of the watched directory rather than suppressing the rule. Baseline with a full <code>scan</code> first, see what fires against normal operation, then decide which rules to disable by ID before you ever consider enforce mode.</p>
     </div>
   </div>
 </section>
@@ -610,7 +610,7 @@ numbat hook install --agent claude --emit all \
       <div class="card">
         <span class="tick">Delivery</span>
         <h3>Write to file, ship separately</h3>
-        <p>Direct HTTP from the hook is not a durable queue — a failed batch retries once and then drops oldest-first. Write hooks to file, and run <code>numbat ship</code> alongside to tail that file to an ingest endpoint with at-least-once delivery and checkpointing.</p>
+        <p>Direct HTTP from the hook is not a durable queue — a failed batch is retried on the next write once 30 seconds have passed (there is no background timer), plus one best-effort flush at exit, and records are dropped oldest-first once the in-memory buffer fills. A hook process rarely lives long enough for any of that to help. Write hooks to file, and run <code>numbat ship</code> alongside to tail that file to an ingest endpoint with at-least-once delivery and checkpointing.</p>
       </div>
       <div class="card">
         <span class="tick">Scope</span>
@@ -629,7 +629,7 @@ env NUMBAT_HTTP_TOKEN=$TOKEN numbat ship \
   --http-auth bearer</pre>
 
     <div class="callout">
-      <p><strong>Rotation is on you.</strong> numbat never truncates or rotates its own output, and <code>ship</code> never touches the input file. Without logrotate or equivalent, <code>--emit all</code> on an active agent fleet will grow unbounded. Start with findings-only on secondary machines and promote to full events where you actually need them.</p>
+      <p><strong>Rotation is on you.</strong> numbat's hook capture only ever appends — it never rotates — and <code>ship</code> never touches the input file. (<code>numbat scan --output file --output-file PATH</code> is the exception: it truncates <code>PATH</code> on every run, so don't point it at a log you are keeping.) Without logrotate or equivalent, <code>--emit all</code> on an active agent fleet will grow unbounded. Start with findings-only on secondary machines and promote to full events where you actually need them.</p>
     </div>
   </div>
 </section>
@@ -699,7 +699,7 @@ env NUMBAT_HTTP_TOKEN=$TOKEN numbat ship \
       li: [
         "Requires a rule with enforce: true — install refuses if the catalog has none.",
         "Requires a file or HTTP sink; stdout is rejected outright in this mode.",
-        "Any ambiguity — decode error, missing sequence state, internal panic — suppresses the deny.",
+        "A decode error or an internal panic suppresses the deny. Unavailable sequence state does not — it skips sequence rules and lets a clean stateless deny through, by design.",
         "A sequence rule can only block its final step. The earlier steps already happened."
       ]
     }
@@ -728,7 +728,7 @@ env NUMBAT_HTTP_TOKEN=$TOKEN numbat ship \
     schema_version: ["schema_version", "The record contract version, currently 0.2.0. It moves independently of the tool version, and only when the emitted shape actually changes. Pin your parsers to it."],
     rule_id: ["rule_id", "Which rule matched. Stable across versions, which makes it the right key for suppression lists and for counting noise during your baseline."],
     severity: ["severity", "The rule author's judgment of impact if the pattern is real. Set per rule in YAML, so your own rules control their own severity."],
-    confidence: ["confidence", "Parser certainty, not maliciousness. High means direct source evidence; medium and low mean numbat inferred or best-effort normalized the event. Do not alert-rank on this."],
+    confidence: ["confidence", "How directly evidence backs the observation, not maliciousness and not parser certainty. High means a durable artifact; medium means inferred from a command, path, or config shape; low means a weak signal or a tolerant parse. Hook records are capped at medium because the evidence is the agent's own report. Do not alert-rank on this."],
     cited_event_ids: ["cited_event_ids", "The exact events that produced this finding. For a sequence rule you get every step. This is the join key back into the event stream — capture --emit all or these point at nothing."],
     observed_command: ["observed_command", "The command text as normalized, post-redaction. For pre-action hooks this is what was proposed, not what executed."],
     project_path_hash: ["project_path_hash", "A stable unsalted SHA-256 of the project path. It's a join key, not anonymization — treat it as pseudonymous metadata. Events keep a readable project_path instead."],

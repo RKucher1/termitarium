@@ -310,8 +310,51 @@
 (function(){
   "use strict";
 
-  var ROW = 29, OVER = 12, MAX_BYTES = 900*1024*1024;
+  var ROW = 29, OVER = 12;
   var POLL_MS = 4000;
+
+  /* [sizeguard:begin] */
+  /* Every load path ends in one JavaScript string — FileReader for a file you
+     opened, Response.text() for one the daemon served — and engines cap how
+     long a string may be. V8 stops at 2^29-24 bytes, 24 short of 512 MiB;
+     other engines pick other numbers. Past the cap the load fails with a
+     RangeError naming nothing an operator can act on, and long before it the
+     tab is unusable. So refuse early, at a limit the viewer can state.
+
+     The old limit was 900 MB, which sits *above* V8's cap: it could not fire
+     before the engine did, so it never prevented the failure it existed to
+     prevent. And it was only ever checked on the file-picker path, never on
+     the served path that every normal open goes through.
+
+     Bytes are the conservative measure. UTF-8 decoding never yields more
+     characters than it consumed bytes, so anything inside the byte limit is
+     inside the string limit too. */
+  var MAX_BYTES = 480*1024*1024;
+
+  /* True only for a size we know and that is too large. An unknown size is
+     never a refusal — the caller cannot act on what it was not told, and the
+     load's own failure path still covers it. */
+  function overSize(bytes){
+    return typeof bytes === "number" && isFinite(bytes) && bytes > MAX_BYTES;
+  }
+
+  /* Content-Length as a number, or null when the header is absent, negative,
+     or not a plain integer. A served response normally carries it; a chunked
+     or compressed one may not, and a wrong guess is worse than no guess. */
+  function hdrSize(v){
+    if(typeof v !== "string") return null;
+    var s = v.trim();
+    if(!/^[0-9]+$/.test(s)) return null;
+    var n = parseInt(s, 10);
+    return isFinite(n) ? n : null;
+  }
+  /* [sizeguard:end] */
+
+  /* Outside the pure block because it formats: fmtB lives elsewhere. */
+  function oversizeMsg(bytes){
+    return "That stream is " + fmtB(bytes) + " — past the " + fmtB(MAX_BYTES) +
+           " a browser can hold in one string. Prune it, or pre-filter with jq.";
+  }
   var DEFAULT_SOURCES = ["../records.ndjson","../findings.ndjson","../numbat-baseline.ndjson"];
 
   var recs=[], view=[], sel=-1, handle=null, bad=0, eidx=null;
@@ -434,6 +477,8 @@
     progTxt.textContent = "fetching " + base(url);
     fetch(url, { cache:"no-store" }).then(function(r){
       if(!r.ok) throw new Error("HTTP " + r.status);
+      var n = hdrSize(r.headers.get("content-length"));
+      if(overSize(n)){ var big = new Error(oversizeMsg(n)); big.plain = true; throw big; }
       lastSig = sigOf(r);
       return r.text();
     }).then(function(txt){
@@ -442,7 +487,8 @@
     }).catch(function(err){
       if(token !== loadToken) return;
       loading = false; prog.hidden = true;
-      toast("Could not fetch " + base(url) + " — " + (err && err.message ? err.message : "request failed"), true);
+      toast(err && err.plain ? err.message
+            : "Could not fetch " + base(url) + " — " + (err && err.message ? err.message : "request failed"), true);
       if(!recs.length){ land.hidden = false; head.hidden = true; qbar.hidden = true; main.hidden = true; }
     });
   }
@@ -524,6 +570,8 @@
     loading = true;
     fetch(url, { cache:"no-store" }).then(function(r){
       if(!r.ok) throw new Error("HTTP " + r.status);
+      var n = hdrSize(r.headers.get("content-length"));
+      if(overSize(n)){ var big = new Error(oversizeMsg(n)); big.plain = true; throw big; }
       return r.text();
     }).then(function(txt){
       if(token !== loadToken) return;
@@ -554,20 +602,20 @@
         }
         paint();
       });
-    }).catch(function(){
+    }).catch(function(err){
       loading = false; prog.hidden = true;
       if(liveOn) liveState("err");
-      toast("Refresh failed — could not re-read " + base(url), true);
+      // A stream that outgrew the limit mid-session will fail this way on every
+      // poll, so say why rather than repeating a generic refresh failure.
+      toast(err && err.plain ? err.message
+            : "Refresh failed — could not re-read " + base(url), true);
     });
   }
 
   /* ═════ load from File ═════ */
   function load(file){
     if(!file){ toast("No file selected", true); return; }
-    if(typeof file.size === "number" && file.size > MAX_BYTES){
-      toast("File is " + fmtB(file.size) + " — too large for a browser. Prune it or pre-filter with jq.", true);
-      return;
-    }
+    if(overSize(file.size)){ toast(oversizeMsg(file.size), true); return; }
     if(typeof file.size === "number" && file.size === 0){ toast("That file is empty", true); return; }
     var token = ++loadToken;
     loading = true;
