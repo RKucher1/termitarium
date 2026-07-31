@@ -177,7 +177,7 @@
   <div class="hero">
     <div class="eyebrow">Three components · one loopback boundary</div>
     <h1>numbat writes the records. This is <em>where you read them</em>.</h1>
-    <p class="lede">A Go daemon serves one HTML file and a whitelist of NDJSON over 127.0.0.1. The page parses in chunks, renders a virtual window, and never sends a byte anywhere. A Python tool trims the log on a schedule without ever losing a record. That's the whole system.</p>
+    <p class="lede">A Go daemon serves one HTML file, its icon, and a whitelist of NDJSON over 127.0.0.1 — the records from one directory, the tooling from another. The page parses in chunks, renders a virtual window, summarizes a session on demand, and never sends a byte anywhere. A Python tool trims the log on a schedule without ever losing a record. That's the whole system.</p>
   </div>
 </div>
 
@@ -186,48 +186,64 @@
   <div class="wrap">
     <div class="eyebrow">Request path</div>
     <h2 class="sec-title">Browser to daemon to disk. Nothing leaves the machine.</h2>
-    <p class="sec-lede">The viewer never touches the filesystem directly — browsers forbid it. numbatd is the shim: it answers three routes, and everything it will serve is decided by a regex before a file handle is ever opened.</p>
+    <p class="sec-lede">The viewer never touches the filesystem directly — browsers forbid it. numbatd is the shim: it answers four routes across two directories, and everything it will serve is decided by a regex before a file handle is ever opened. Records and tooling are deliberately kept apart — the viewer used to be deployed into the directory numbat watches, which made every redeploy trip numbat's own tamper rule.</p>
 
     <div class="stage">
-      <svg viewBox="0 0 1000 300" role="img" aria-label="Request flow from browser through numbatd to the numbat data directory">
-        <text class="stagelbl" x="20" y="20">BROWSER</text>
-        <text class="stagelbl" x="360" y="20">NUMBATD · 127.0.0.1:8787</text>
-        <text class="stagelbl" x="808" y="20">DISK</text>
+      <svg viewBox="0 0 1000 300" role="img" aria-label="Request flow from the browser through numbatd's four routes to the record directory and the tools directory">
+        <text class="stagelbl" x="20" y="16">BROWSER</text>
+        <text class="stagelbl" x="360" y="16">NUMBATD · 127.0.0.1:8787</text>
+        <text class="stagelbl" x="808" y="16">DISK</text>
 
         <rect class="nodebox" x="20" y="112" width="210" height="72" rx="3"/>
         <text class="nodetxt" x="36" y="140">viewer.html</text>
         <text class="nodesub" x="36" y="160">fetch() · no filesystem</text>
         <text class="nodesub" x="36" y="175">access of its own</text>
 
-        <path class="flow" d="M230 148 H360" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
+        <path class="flow" d="M230 148 H330" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
 
-        <rect class="nodebox" x="360" y="40" width="200" height="54" rx="3"/>
-        <text class="nodetxt" x="376" y="63">GET /</text>
-        <text class="nodesub" x="376" y="81">serves the viewer</text>
+        <rect class="nodebox" x="360" y="26" width="200" height="54" rx="3"/>
+        <text class="nodetxt" x="376" y="49">GET /</text>
+        <text class="nodesub" x="376" y="67">serves the viewer</text>
 
-        <rect class="nodebox" x="360" y="118" width="200" height="54" rx="3"/>
-        <text class="nodetxt" x="376" y="141">GET /api/sources</text>
-        <text class="nodesub" x="376" y="159">JSON list, largest first</text>
+        <rect class="nodebox" x="360" y="92" width="200" height="54" rx="3"/>
+        <text class="nodetxt" x="376" y="115">GET /favicon.ico</text>
+        <text class="nodesub" x="376" y="133">fixed path · a real PNG</text>
 
-        <rect class="nodebox" x="360" y="196" width="200" height="54" rx="3"/>
-        <text class="nodetxt" x="376" y="219">GET /files/{name}</text>
-        <text class="nodesub" x="376" y="237">HEAD supported</text>
+        <rect class="nodebox" x="360" y="158" width="200" height="54" rx="3"/>
+        <text class="nodetxt" x="376" y="181">GET /api/sources</text>
+        <text class="nodesub" x="376" y="199">JSON list, largest first</text>
 
-        <path d="M330 148 V67 H360" stroke="rgba(237,230,218,.2)" stroke-width="1" fill="none"/>
-        <path d="M330 148 V223 H360" stroke="rgba(237,230,218,.2)" stroke-width="1" fill="none"/>
+        <rect class="nodebox" x="360" y="224" width="200" height="54" rx="3"/>
+        <text class="nodetxt" x="376" y="247">GET /files/{name}</text>
+        <text class="nodesub" x="376" y="265">HEAD supported</text>
 
-        <rect class="nodebox" x="600" y="112" width="170" height="72" rx="3" stroke="var(--amberline)"/>
-        <text class="nodetxt" x="616" y="140" style="fill:var(--amberline)">whitelist</text>
-        <text class="nodesub" x="616" y="159">*.ndjson only</text>
-        <text class="nodesub" x="616" y="174">symlinks resolved</text>
+        <path d="M330 148 V53 H360" stroke="rgba(237,230,218,.2)" stroke-width="1" fill="none"/>
+        <path d="M330 148 V119 H360" stroke="rgba(237,230,218,.2)" stroke-width="1" fill="none"/>
+        <path d="M330 148 V185 H360" stroke="rgba(237,230,218,.2)" stroke-width="1" fill="none"/>
+        <path d="M330 148 V251 H360" stroke="rgba(237,230,218,.2)" stroke-width="1" fill="none"/>
 
-        <path class="flow" d="M560 148 H600" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
-        <path class="flow" d="M770 148 H820" stroke="var(--rufous)" stroke-width="1.5" fill="none"/>
+        <rect class="nodebox" x="600" y="224" width="170" height="54" rx="3" stroke="var(--amberline)"/>
+        <text class="nodetxt" x="616" y="245" style="fill:var(--amberline)">whitelist</text>
+        <text class="nodesub" x="616" y="262">*.ndjson · symlinks resolved</text>
 
-        <rect class="nodebox" x="820" y="112" width="160" height="72" rx="3"/>
-        <text class="nodetxt" x="836" y="140">~/.numbat</text>
-        <text class="nodesub" x="836" y="160">records.ndjson</text>
-        <text class="nodesub" x="836" y="175">written by hooks</text>
+        <path class="flow" d="M560 251 H600" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
+
+        <path class="flow" d="M560 53 H820" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
+        <path class="flow" d="M560 119 H790 V100 H820" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
+        <path class="flow" d="M560 185 H790 V200 H820" stroke="var(--rufous)" stroke-width="1.5" fill="none"/>
+        <path class="flow" d="M770 251 H795 V220 H820" stroke="var(--rufous)" stroke-width="1.5" fill="none"/>
+
+        <rect class="nodebox" x="820" y="26" width="170" height="86" rx="3"/>
+        <text class="nodetxt" x="836" y="50">~/.termitarium</text>
+        <text class="nodesub" x="836" y="70">viewer.html · favicon.png</text>
+        <text class="nodesub" x="836" y="85">-tools · not watched</text>
+        <text class="nodesub" x="836" y="100">by numbat</text>
+
+        <rect class="nodebox" x="820" y="158" width="170" height="86" rx="3"/>
+        <text class="nodetxt" x="836" y="182">~/.numbat</text>
+        <text class="nodesub" x="836" y="202">records.ndjson</text>
+        <text class="nodesub" x="836" y="217">-dir · written by hooks</text>
+        <text class="nodesub" x="836" y="232">read-only to the daemon</text>
       </svg>
     </div>
 
@@ -333,6 +349,13 @@
           <p>Findings reference their evidence by <code>cited_event_ids</code>. The id-to-index map is built on first use, not at load, so files with no findings never pay for it. That map is what turns a sequence match into two clicks from the commands behind it.</p>
         </div>
       </div>
+      <div class="step">
+        <div class="step-n">05</div>
+        <div>
+          <h3>Bucket once, summarize on demand</h3>
+          <p>Narrowing to a single session summarizes it. Records are bucketed by <code>session_id</code> in one pass and each summary is cached, because sessions are wildly uneven — one session in the reference corpus holds 76% of its records. Rescanning every record per session made the session list quadratic and froze the tab for seconds on every live poll; bucketed, eight thousand sessions build in tens of milliseconds. The summary itself is a pure function of one session's records, so it is unit tested outside the browser alongside the record descriptions.</p>
+        </div>
+      </div>
     </div>
 
     <div class="callout">
@@ -403,6 +426,14 @@
       <div class="limit">
         <h3>Records are sensitive</h3>
         <p>Agent commands, prompts, project paths, hostname, and username sit in plaintext on disk. numbat redacts values before emission, but what remains is still a detailed account of what ran on your machine.</p>
+      </div>
+      <div class="limit">
+        <h3>Success is not in the data</h3>
+        <p>numbat's schema defines an optional <code>exit_code</code>, but no record in the reference corpus carries one — a <code>command.result</code> arrives with <code>duration_ms</code> and nothing else. So nothing here can tell you whether a command worked. The viewer reports what was proposed and what was observed, names the gaps, and refuses to imply an outcome; the one real failure signal is the <code>tool_error</code> tag, which numbat sets only from a field the agent itself used to mark failure, and whose absence proves nothing.</p>
+      </div>
+      <div class="limit">
+        <h3>Subagents are not separate sessions</h3>
+        <p>numbat maps <code>SubagentStart</code>/<code>SubagentStop</code> onto <code>session.start</code>/<code>session.end</code> and copies <code>session_id</code> straight from the agent rather than minting one, so a parallel dispatch records its boundaries against its <em>parent</em>. One session in the reference corpus carries 29 starts and 36 ends of which one start and no ends are its own. Only boundaries with no <code>sub_agent</code> say anything about the session itself.</p>
       </div>
       <div class="limit">
         <h3>Schema will move</h3>

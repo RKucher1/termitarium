@@ -21,7 +21,8 @@ will move; check \`CHANGELOG.md\` for the version this tracks.
 | | |
 |---|---|
 | `viewer/viewer.html` | Single-file record viewer: plain-language descriptions, per-finding interpretation, session rollups, virtual scrolling, query language, timeline scrubbing, cited-event resolution |
-| `numbatd/main.go` | ~150-line Go server that serves the viewer and whitelisted `*.ndjson` over loopback |
+| `numbatd/main.go` | ~190-line Go server: serves the viewer and its icon from `-tools`, and whitelisted `*.ndjson` from `-dir`, over loopback only |
+| `numbatd/go.mod` | Module definition — Go 1.16+ refuses to build outside a module, so the tree cannot be built without it |
 | `prune/numbat-prune` | Retention tool: archive-before-delete, atomic replace, never loses a record |
 | `install.sh` | Per-user install, builds the binary, wires launchd |
 | `tools/gen-rule-catalog.js` | Maintainer tool: regenerates the viewer's embedded rule catalog from numbat's rule YAML. Never needed at runtime |
@@ -35,23 +36,32 @@ will move; check \`CHANGELOG.md\` for the version this tracks.
 git clone https://github.com/RKucher1/termitarium
 cd termitarium
 ./install.sh
-nb
+open http://127.0.0.1:8787/
 ```
 
-Requires Go and Python 3 (both already present on a typical macOS dev box).
-Everything installs under `$HOME`. No sudo. `./install.sh --uninstall` reverses
-it and leaves your records alone.
+Requires Go (to build the daemon) and Python 3 (`prune/numbat-prune` is a
+Python script). Everything installs under `$HOME`. No sudo.
+`./install.sh --uninstall` reverses it and leaves your records alone.
 
 ## Use
 
-```
-nb              open the viewer
-nb status       is the daemon up? what is it serving?
-nb prune -n     dry-run retention, change nothing
-nb prune        apply the 30-day window
-nb logs         tail the daemon log
-nb help         full command list
-```
+The daemon starts at login and serves the viewer at
+**<http://127.0.0.1:8787/>** — that URL is all you need.
+
+`nb` is a convenience wrapper and it is **fish-only**. `install.sh` writes it
+to `~/.config/fish/functions/nb.fish` and skips it entirely when there is no
+`~/.config/fish`, so on bash or zsh the command will not exist. Use the
+right-hand column instead.
+
+| fish | any shell |
+|---|---|
+| `nb` / `nb view` | `open http://127.0.0.1:8787/` |
+| `nb status` | `curl -s http://127.0.0.1:8787/api/sources` |
+| `nb start` | `launchctl load ~/Library/LaunchAgents/com.siliconhills.numbatd.plist` |
+| `nb stop` | `launchctl unload ~/Library/LaunchAgents/com.siliconhills.numbatd.plist` |
+| `nb prune -n` | `~/.numbat/bin/numbat-prune -n` |
+| `nb prune` | `~/.numbat/bin/numbat-prune` |
+| `nb logs` | `tail -n 30 ~/.numbat/numbatd.log` |
 
 ## Viewer
 
@@ -123,8 +133,8 @@ streaming it live.
 - **Copy jq** — translates the current filter state into an equivalent `jq`
   command for scripting.
 
-Keys: `/` search · `j`/`k` move · `g`/`G` ends · `s` sort · `r` reload · `l`
-live · `esc` clear.
+Keys: `/` search · `j`/`k` (or `↑`/`↓`) move · `g`/`G` ends · `s` sort ·
+`r` reload · `l` live · `o` open a file · `esc` clear.
 
 Virtualized rendering, chunked parsing, and a cached lowercase index per record
 keep it responsive on large files. All output is HTML-escaped — agent command
@@ -199,8 +209,10 @@ hostile pages in your browser*.
   a localhost service.
 - **No CORS headers, ever.** A malicious page can send a request to 127.0.0.1
   but the browser will not let it read the response.
-- **Fixed-path icon.** `/favicon.ico` serves `tools/favicon.png` and nothing
-  else. The path is a compile-time constant, so no part of the request reaches
+- **Fixed-path icon.** `/favicon.ico` serves `favicon.png` from the `-tools`
+  directory and nothing else — Safari ignores SVG favicons supplied as `data:`
+  URIs, so a real PNG has to be served. The filename is a compile-time
+  constant joined to `-tools`, so no part of the request reaches
   the filesystem — traversal is impossible by construction, not by filtering.
   It sits behind the same Host check, method restriction, and `nosniff` header
   as every other route.
