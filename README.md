@@ -69,12 +69,14 @@ Opened at `http://127.0.0.1:8787/`, it asks the daemon for the source list,
 loads your primary record file automatically — no file picker — and starts
 streaming it live.
 
-- **Descriptions** — every record renders as a plain sentence (`Ran a shell
-  command: npm test`, `Blocked an action: net.egress.block`) with its event type
-  kept alongside as secondary context. The raw JSON stays one click away in the
-  detail pane. Descriptions state only what the record contains — a
-  `command.result` with no `exit_code` reports its duration rather than claiming
-  success.
+- **Descriptions** — every record renders as a plain sentence (`Proposed a
+  shell command: npm test`, `Blocked an action: net.egress.block`) with its
+  event type kept alongside as secondary context. The raw JSON stays one click
+  away in the detail pane. Descriptions state only what the record contains: a
+  `command.result` with no `exit_code` reports its duration rather than
+  claiming success, and a `command.exec` says *proposed* rather than *ran*
+  because on the hook path numbat sees the command before it executes — whether
+  it ran is `command.result`'s business, and the two are not always paired.
 - **Sort order** — newest first by default; toggle with the button in the query
   bar or `s`. Records with no parseable timestamp always sort to the bottom, in
   file order, in both directions. The timeline stays chronological regardless.

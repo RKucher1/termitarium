@@ -752,7 +752,11 @@
   function dsDur(ms){
     if(ms < 1000) return ms + " ms";
     if(ms < 60000) return (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + " s";
-    return Math.round(ms / 60000) + " min";
+    // Cascade past the hour. "267 min" is not a duration anyone reads, and the
+    // rollup renders the same span two panes away as "4h 27m".
+    var min = Math.floor(ms / 60000);
+    if(min < 60) return min + " min";
+    return Math.floor(min / 60) + " h " + (min % 60) + " min";
   }
 
   function dsEvent(o){
@@ -763,8 +767,14 @@
     var ec   = dsNum(o.exit_code);
 
     if(et === "command.exec")
-      return cmd ? "Ran a shell command: " + cmd
-                 : (tool ? "Ran a command via " + tool : "Ran a shell command");
+      // "Ran" asserts execution that this record cannot establish. command.exec
+      // is the invocation, not the outcome — on the hook path numbat sees it
+      // before it runs, and whether it ran is command.result's business. The
+      // interpretation pane and the session rollup both already say "proposed";
+      // this is the sentence the operator reads five thousand times, so it is
+      // the one that most needs to agree with them.
+      return cmd ? "Proposed a shell command: " + cmd
+                 : (tool ? "Proposed a command via " + tool : "Proposed a shell command");
     if(et === "command.result"){
       if(ec === 0) return "Command finished successfully";
       if(ec !== null) return "Command failed (exit " + ec + ")";
@@ -1044,8 +1054,11 @@
   function ruN(n){
     try { return n.toLocaleString(); } catch(e){ return String(n); }
   }
+  // Keys are record-derived and otherwise unbounded: a single record with a
+  // 300 KB source_agent produced a multi-megabyte pane. Bound them where they
+  // enter, so every consumer inherits the limit.
   function ruBump(map, key){
-    var k = ruClean(key);
+    var k = ruTrunc(key, 120);
     if(!k) return;
     map[k] = (map[k] || 0) + 1;
   }
@@ -1068,7 +1081,7 @@
     return out;
   }
   function ruNoteRule(map, id, title, sev){
-    var k = ruClean(id);
+    var k = ruTrunc(id, 120);
     if(!k) return;
     if(!map[k]) map[k] = { name:k, count:0, title:"", sev:"" };
     map[k].count++;
@@ -1098,7 +1111,7 @@
       var rootStart = 0, rootEnd = 0, subStart = 0, subEnd = 0;
       var nExec = 0, nResult = 0, nToolCall = 0, nToolResult = 0;
       var nRead = 0, nWrite = 0, nPrompt = 0, nAssistant = 0;
-      var nFinding = 0, nEnforce = 0, nErrored = 0;
+      var nFinding = 0, nEnforce = 0, nErrored = 0, nOther = 0;
       var nWithExit = 0, nNonZeroExit = 0;
       var anonExec = 0, anonResult = 0;
 
@@ -1201,6 +1214,10 @@
           continue;
         }
         if(et === "message.assistant"){ nAssistant++; continue; }
+        // Everything the grid has no cell for — permission.requested,
+        // network.indicator, record kinds added after this was written. Counted
+        // so the header total reconciles instead of silently exceeding the sum.
+        nOther++;
       }
 
       // Unpaired execs: a command.exec whose tool_call_id never got a result.
@@ -1310,7 +1327,7 @@
                   toolCalls: nToolCall, toolResults: nToolResult,
                   reads: nRead, uniqueReads: uniqRead,
                   writes: nWrite, uniqueWrites: uniqWrite,
-                  prompts: nPrompt, assistantMessages: nAssistant },
+                  prompts: nPrompt, assistantMessages: nAssistant, other: nOther },
         outcome: { errored: nErrored, withExitCode: nWithExit, nonZeroExit: nNonZeroExit },
         findings: { total: nFinding, bySeverity: ruRank(sevs), rules: ruRankOf(rules) },
         files: { read: ruRank(readPaths), written: ruRank(writePaths) },
@@ -1848,6 +1865,7 @@
     h += rvCell(v.uniqueReads, "distinct files read", "", base + " event:file.read");
     h += rvCell(v.uniqueWrites, "distinct files written", "", base + " event:file.write");
     h += rvCell(v.prompts, "prompts", "", base + " event:prompt.user");
+    if(v.other) h += rvCell(v.other, "other records");
     h += '</div>';
 
     // Which files, not just how many: the written path is frequently the same

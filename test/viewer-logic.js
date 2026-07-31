@@ -84,15 +84,15 @@ function ok(label, cond, detail){
 
 eq("event/command.exec names the command",
    describe({ record_type:"event", event_type:"command.exec", tool_name:"Bash", command:"npm test" }),
-   "Ran a shell command: npm test");
+   "Proposed a shell command: npm test");
 
 eq("event/command.exec falls back to the tool when no command is present",
    describe({ record_type:"event", event_type:"command.exec", tool_name:"Bash" }),
-   "Ran a command via Bash");
+   "Proposed a command via Bash");
 
 eq("event/command.exec reads the legacy observed_command field",
    describe({ record_type:"event", event_type:"command.exec", observed_command:"rm -rf /tmp/x" }),
-   "Ran a shell command: rm -rf /tmp/x");
+   "Proposed a shell command: rm -rf /tmp/x");
 
 eq("event/command.result exit 0 reports success",
    describe({ record_type:"event", event_type:"command.result", exit_code:0 }),
@@ -251,7 +251,7 @@ eq("all-null fields degrade instead of printing null",
 
 eq("null fields inside a known record type degrade cleanly",
    describe({ record_type:"event", event_type:"command.exec", command:null, tool_name:null }),
-   "Ran a shell command");
+   "Proposed a shell command");
 
 eq("a non-object is rejected without throwing (null)", describe(null), "Unrecognized record");
 eq("a non-object is rejected without throwing (undefined)", describe(undefined), "Unrecognized record");
@@ -261,11 +261,11 @@ eq("a non-object is rejected without throwing (number)", describe(42), "Unrecogn
 
 eq("object-valued fields never leak [object Object] into the sentence",
    describe({ record_type:"event", event_type:"command.exec", command:{ nested:true } }),
-   "Ran a shell command");
+   "Proposed a shell command");
 
 eq("whitespace and newlines collapse to a single line",
    describe({ record_type:"event", event_type:"command.exec", command:"npm  test\n\n--watch" }),
-   "Ran a shell command: npm test --watch");
+   "Proposed a shell command: npm test --watch");
 
 /* ── truncation: a 10KB command must not produce a 10KB sentence ────────── */
 
@@ -275,7 +275,7 @@ eq("whitespace and newlines collapse to a single line",
   ok("a 10KB command is truncated", out.length < 200,
      "got " + out.length + " chars");
   ok("the truncated command is marked with an ellipsis", out.slice(-1) === "…", JSON.stringify(out.slice(-20)));
-  ok("the truncated command keeps its leading context", out.indexOf("Ran a shell command: curl ") === 0);
+  ok("the truncated command keeps its leading context", out.indexOf("Proposed a shell command: curl ") === 0);
 })();
 
 (function(){
@@ -1303,6 +1303,59 @@ function noteMatching(r, re){
   ok("rollup/truncation leaves no dangling high surrogate",
      !(lastReal.charCodeAt(lastReal.length - 1) >= 0xD800 &&
        lastReal.charCodeAt(lastReal.length - 1) <= 0xDBFF));
+})();
+
+/* — describe() must not assert an outcome the record cannot establish. This is
+     the sentence rendered on every row, so it is the one that most needs to
+     agree with interpret() and rollup(), both of which say "proposed". — */
+(function(){
+  var d = describe({ record_type:"event", event_type:"command.exec",
+                     source_type:"hook", command:"rm -rf /tmp/x" });
+  ok("describe() does not claim a command.exec ran", !/\bRan\b/.test(d), d);
+  ok("describe() says a command.exec was proposed", /^Proposed a shell command/.test(d), d);
+
+  // A finished command with no exit code must still not read as success.
+  var r = describe({ record_type:"event", event_type:"command.result", duration_ms:1900 });
+  ok("describe() does not claim success without an exit code",
+     !/success|succeed/i.test(r), r);
+  eq("describe() reports the duration it does have", r, "Command finished after 1.9 s");
+
+  // Durations cascade past the hour rather than reading "267 min".
+  eq("describe() renders a multi-hour duration readably",
+     describe({ record_type:"event", event_type:"command.result", duration_ms:16020000 }),
+     "Command finished after 4 h 27 min");
+  eq("describe() still renders sub-hour durations in minutes",
+     describe({ record_type:"event", event_type:"command.result", duration_ms:150000 }),
+     "Command finished after 2 min");
+})();
+
+/* — record-derived map keys are unbounded in the record; bound them at entry so
+     one hostile field cannot inflate the pane — */
+(function(){
+  var huge = new Array(4000).join("x");
+  var r = rollup([ ev("file.read", { source_agent:huge, file_path:"/a" }) ], "s1");
+  ok("rollup() bounds an unbounded agent name", r.agents[0].name.length <= 120,
+     "length was " + r.agents[0].name.length);
+  ok("rollup() bounds an unbounded rule id",
+     rollup([{ record_type:"finding", session_id:"s1", rule_id:huge, severity:"high" }], "s1")
+       .findings.rules[0].name.length <= 120);
+})();
+
+/* — the header total must reconcile with the grid, not silently exceed it — */
+(function(){
+  var r = rollup([
+    ev("session.start"),
+    ev("command.exec", { tool_call_id:"c1" }),
+    ev("permission.requested", { decision:"asked" }),
+    ev("network.indicator", { url:"https://x" })
+  ], "s1");
+  eq("rollup/other counts records no grid cell covers", r.volume.other, 2);
+  var accounted = r.volume.execs + r.volume.results + r.volume.toolCalls + r.volume.toolResults +
+                  r.volume.reads + r.volume.writes + r.volume.prompts + r.volume.assistantMessages +
+                  r.volume.other + r.findings.total + r.enforcement.total +
+                  r.lifecycle.rootStarts + r.lifecycle.rootEnds +
+                  r.lifecycle.subStarts + r.lifecycle.subEnds;
+  eq("rollup/other makes the parts sum to the whole", accounted, r.records);
 })();
 
 /* — the three pure blocks each carry their own copy of these helpers so they
