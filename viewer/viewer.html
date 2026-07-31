@@ -53,7 +53,12 @@
   .live{display:flex;align-items:center;gap:6px}
   .dot{width:7px;height:7px;border-radius:50%;background:var(--dust);flex:0 0 auto}
   .dot.on{background:var(--verdigris);animation:pulse 1.9s ease-in-out infinite}
+  .dot.hit{background:var(--amber);animation:hit .6s ease-out 3}
+  .dot.err{background:var(--rufous);animation:none}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  @keyframes hit{0%{transform:scale(2.1);opacity:1}100%{transform:scale(1);opacity:1}}
+  .livestat{font-family:var(--mono);font-size:9.5px;color:var(--dust);letter-spacing:.04em}
+  .livestat:empty{display:none}
   .fileinfo{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--dust);text-align:right;line-height:1.45;max-width:36%;overflow:hidden}
   .fileinfo b{color:var(--band);font-weight:500}
   .fileinfo .warnbit{color:var(--amber)}
@@ -120,6 +125,7 @@
   .row .ag{color:var(--dust);font-size:10px;overflow:hidden;text-overflow:ellipsis}
   .row .bd{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
   .row .bd strong{font-weight:500;color:var(--band)}
+  .row .bd i.ev{font-style:normal;color:var(--dust);font-size:10px;margin-left:7px}
   .row mark{background:rgba(216,162,74,.3);color:var(--band);border-radius:2px}
   .k-finding{color:var(--rufous)} .k-event{color:var(--dust)} .k-enforcement{color:var(--amber)}
   .k-indicator{color:var(--verdigris)} .k-scan_summary{color:var(--violet)} .k-diagnostic{color:var(--dust)}
@@ -131,6 +137,7 @@
   .detail{overflow-y:auto;background:var(--soil)}
   .dhead{padding:14px 16px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--soil);z-index:2}
   .dhead h2{margin:0 0 6px;font-family:var(--mono);font-size:13px;font-weight:500;word-break:break-all}
+  .dsum{margin:0 0 9px;font-size:13.5px;line-height:1.5;color:var(--band)}
   .dmeta{display:flex;gap:6px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px}
   .tag{background:var(--ridge);border:1px solid var(--line);border-radius:2px;padding:2px 7px;color:var(--dim);letter-spacing:.06em;word-break:break-all}
   .tag.hi{color:var(--rufous);border-color:rgba(201,85,43,.45)}
@@ -168,7 +175,7 @@
 <div class="bar">
   <span class="brand"><span class="pelt"><i style="height:6px"></i><i style="height:11px"></i><i style="height:13px"></i><i style="height:9px"></i><i style="height:12px"></i></span>record viewer</span>
   <select id="src" hidden aria-label="Record source"></select>
-  <button class="btn" id="live" hidden title="Poll the file for new records"><span class="live"><span class="dot" id="dot"></span>Live</span></button>
+  <button class="btn" id="live" hidden title="Poll the file for new records"><span class="live"><span class="dot" id="dot"></span>Live<span class="livestat" id="livestat"></span></span></button>
   <button class="btn primary" id="open" hidden>Open</button>
   <button class="btn" id="reload" disabled title="Re-read from disk (r)">Reload</button>
   <button class="btn" id="jq" disabled title="Copy an equivalent jq command">Copy jq</button>
@@ -198,7 +205,8 @@
     <input id="q" placeholder="search…   or   rule:chain sev:high -type:event" spellcheck="false" autocomplete="off" aria-label="Filter records">
     <span class="qhint" id="qhint"></span>
   </div>
-  <span class="qhelp"><b>/</b> search · <b>j/k</b> move · <b>r</b> reload · <b>esc</b> clear</span>
+  <button class="btn" id="sortBtn" title="Toggle newest / oldest first (s)" aria-label="Sort order"><span id="sortLbl">↓ newest</span></button>
+  <span class="qhelp"><b>/</b> search · <b>j/k</b> move · <b>s</b> sort · <b>r</b> reload · <b>esc</b> clear</span>
 </div>
 <div class="pills" id="pills"></div>
 
@@ -236,8 +244,9 @@
 
   var recs=[], view=[], sel=-1, handle=null, bad=0, eidx=null;
   var range=null, kindFilter="", loadToken=0, loading=false, lastDesc=null;
+  var sortDesc=true;
   var served = (location.protocol === "http:" || location.protocol === "https:");
-  var liveOn=false, liveTimer=null, lastSig="", freshFrom=-1, freshTimer=null;
+  var liveOn=false, liveTimer=null, lastSig="", freshFrom=-1, freshTimer=null, autoLive=false;
 
   function $(i){ return document.getElementById(i); }
   var land=$("land"), head=$("head"), qbar=$("qbar"), main=$("main"), pills=$("pills");
@@ -249,6 +258,7 @@
 
   /* ═════ boot ═════ */
   function boot(){
+    syncSort();
     if(served){
       $("live").hidden = false;
       discover();
@@ -368,36 +378,75 @@
   }
 
   /* ═════ live polling ═════ */
-  $("live").addEventListener("click", function(){
-    liveOn = !liveOn;
+  /* The dot distinguishes four states without opening devtools:
+       grey static  — not polling
+       green pulse  — polling, nothing new (clock shows the last check)
+       amber flash  — polling, N records arrived
+       red          — polling, the source is unreachable */
+  var hitTimer=null, pollFail=0;
+  function liveState(kind, n){
+    var dot=$("dot"), st=$("livestat");
+    if(hitTimer){ clearTimeout(hitTimer); hitTimer=null; }
+    if(kind==="off"){ dot.className="dot"; st.textContent=""; return; }
+    if(kind==="err"){ dot.className="dot on err"; st.textContent="· unreachable"; return; }
+    if(kind==="hit"){
+      dot.className="dot on hit"; st.textContent="· +"+n.toLocaleString();
+      hitTimer=setTimeout(function(){ hitTimer=null; if(liveOn) liveState("idle"); },4000);
+      return;
+    }
+    dot.className="dot on"; st.textContent="· "+clock();
+  }
+  function clock(){
+    var d=new Date(), p=function(x){ return (x<10?"0":"")+x; };
+    return p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());
+  }
+
+  function setLive(on){
+    liveOn = on;
     $("live").classList.toggle("on", liveOn);
-    $("dot").classList.toggle("on", liveOn);
     if(liveTimer){ clearInterval(liveTimer); liveTimer = null; }
     if(liveOn){
+      pollFail = 0;
+      liveState("idle");
       liveTimer = setInterval(pollSource, POLL_MS);
-      toast("Live — checking every " + (POLL_MS/1000) + "s");
-    } else toast("Live off");
+      pollSource();
+    } else liveState("off");
+  }
+
+  $("live").addEventListener("click", function(){
+    autoLive = true; // an explicit choice sticks; do not re-arm on the next load
+    setLive(!liveOn);
+    toast(liveOn ? "Live — checking every " + (POLL_MS/1000) + "s" : "Live off");
+  });
+
+  // A hidden tab throttles setInterval to ~1/min, so catch up the moment it returns.
+  document.addEventListener("visibilitychange", function(){
+    if(!document.hidden && liveOn) pollSource();
   });
 
   function pollSource(){
-    if(!liveOn || loading || document.hidden) return;
+    if(!liveOn || loading) return;
     var url = lastDesc && lastDesc.url;
     if(!url) return;
     fetch(url, { method:"HEAD", cache:"no-store" }).then(function(r){
-      if(!r.ok) return;
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      pollFail = 0;
       var sig = sigOf(r);
-      if(sig !== lastSig){
-        lastSig = sig;
-        var before = recs.length;
-        refreshKeepState(url, before);
-      }
-    }).catch(function(){});
+      if(sig === lastSig){ if(!hitTimer) liveState("idle"); return; }
+      lastSig = sig;
+      refreshKeepState(url, recs.length);
+    }).catch(function(){
+      pollFail++;
+      liveState("err");
+      if(pollFail === 1) toast("Live poll failed — is the daemon still running?", true);
+    });
   }
 
   function refreshKeepState(url, before){
     var keepQ = qEl.value, keepK = kindFilter, keepR = range;
     var keepTop = listwrap.scrollTop, keepSelRaw = (sel >= 0 && recs[sel]) ? recs[sel].raw : null;
     var atBottom = (listwrap.scrollTop + listwrap.clientHeight) >= (spacer.offsetHeight - ROW*2);
+    var atTop = listwrap.scrollTop <= ROW;
     var token = ++loadToken;
     loading = true;
     fetch(url, { cache:"no-store" }).then(function(r){
@@ -418,12 +467,25 @@
           if(freshTimer) clearTimeout(freshTimer);
           freshTimer = setTimeout(function(){ freshFrom = -1; paint(); }, 2600);
           toast("+" + added.toLocaleString() + " new record" + (added===1?"":"s"));
-          if(atBottom) listwrap.scrollTop = spacer.offsetHeight;
+          if(liveOn) liveState("hit", added);
+          // Count arrivals that survived the filters so the viewport can hold
+          // its place: newest-first inserts them above everything on screen.
+          var nNew = 0;
+          for(var v=0; v<view.length; v++) if(view[v] >= before) nNew++;
+          if(sortDesc) listwrap.scrollTop = atTop ? 0 : keepTop + nNew*ROW;
+          else if(atBottom) listwrap.scrollTop = spacer.offsetHeight;
           else listwrap.scrollTop = keepTop;
-        } else listwrap.scrollTop = keepTop;
+        } else {
+          listwrap.scrollTop = keepTop;
+          if(liveOn && !hitTimer) liveState("idle");
+        }
         paint();
       });
-    }).catch(function(){ loading = false; prog.hidden = true; });
+    }).catch(function(){
+      loading = false; prog.hidden = true;
+      if(liveOn) liveState("err");
+      toast("Refresh failed — could not re-read " + base(url), true);
+    });
   }
 
   /* ═════ load from File ═════ */
@@ -481,25 +543,147 @@
     var t = s(o.timestamp) || s(o.detected_at) || s(o.last_seen) || "";
     var ms = 0;
     if(t){ var p = Date.parse(t); if(!isNaN(p)) ms = p; }
+    var desc = describe(o);
     return {
       rt: s(o.record_type) || "unknown", ts:t, tms:ms,
       sev: s(o.severity), rule: s(o.rule_id) || s(o.deny_rule_id),
       agent: s(o.source_agent), etype: s(o.event_type),
       sid: s(o.session_id), eid: s(o.event_id),
-      body: bodyOf(o), raw: raw, low: raw.toLowerCase(), o:o, i:idx
+      desc: desc, raw: raw,
+      // free text searches the description too; field queries stay on raw fields
+      low: (raw + "\n" + desc).toLowerCase(), o:o, i:idx
     };
   }
 
-  function bodyOf(o){
-    var rt = s(o.record_type);
-    if(rt === "finding")      return s(o.rule_id) + " · " + s(o.title);
-    if(rt === "event")        return s(o.event_type) + " · " + (s(o.tool_name)||s(o.observed_command)||s(o.content_preview)||s(o.url)||s(o.file_path));
-    if(rt === "enforcement")  return s(o.decision) + " · " + (s(o.deny_rule_id)||s(o.reason));
-    if(rt === "indicator")    return s(o.type) + " · " + s(o.value) + " ×" + (o.count == null ? 1 : o.count);
-    if(rt === "scan_summary") return "status · " + s(o.status);
-    if(rt === "diagnostic")   return s(o.level) + " · " + s(o.message);
-    return s(o.title) || s(o.message) || s(o.rule_id) || "(no summary field)";
+  /* ═════ describe ═════
+     Plain-language one-liner for a record. Pure: no DOM, no globals, never
+     throws, never returns empty. The block between the markers below is
+     extracted verbatim and unit-tested by test/viewer-logic.js — keep it
+     self-contained (no references to anything outside it). */
+  /* [describe:begin] */
+  function dsStr(v){
+    if(v === undefined || v === null) return "";
+    if(typeof v === "string") return v;
+    if(typeof v === "number") return isFinite(v) ? String(v) : "";
+    if(typeof v === "boolean") return String(v);
+    return ""; // objects and arrays never become part of a sentence
   }
+  function dsTrunc(v, n){
+    var t = dsStr(v).replace(/\s+/g, " ").trim();
+    return t.length > n ? t.slice(0, n - 1) + "…" : t;
+  }
+  function dsNum(v){ return (typeof v === "number" && isFinite(v)) ? v : null; }
+  function dsPath(v){
+    var p = dsTrunc(v, 400);
+    if(!p || p.length <= 58) return p;
+    var parts = p.split("/");
+    if(parts.length > 2){
+      var tail = "…/" + parts.slice(-2).join("/");
+      if(tail.length < p.length) return dsTrunc(tail, 58);
+    }
+    return dsTrunc(p, 58);
+  }
+  function dsHost(v){
+    var u = dsTrunc(v, 400);
+    if(!u) return "";
+    var m = u.match(/^[A-Za-z][A-Za-z0-9+.\-]*:\/\/([^\/?#]+)/);
+    return m ? dsTrunc(m[1], 60) : dsTrunc(u, 60);
+  }
+  function dsDur(ms){
+    if(ms < 1000) return ms + " ms";
+    if(ms < 60000) return (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + " s";
+    return Math.round(ms / 60000) + " min";
+  }
+
+  function dsEvent(o){
+    var et   = dsStr(o.event_type);
+    var tool = dsTrunc(o.tool_name, 40);
+    var cmd  = dsTrunc(o.command, 120) || dsTrunc(o.observed_command, 120);
+    var fp   = dsPath(o.file_path) || dsPath(o.observed_file_path);
+    var ec   = dsNum(o.exit_code);
+
+    if(et === "command.exec")
+      return cmd ? "Ran a shell command: " + cmd
+                 : (tool ? "Ran a command via " + tool : "Ran a shell command");
+    if(et === "command.result"){
+      if(ec === 0) return "Command finished successfully";
+      if(ec !== null) return "Command failed (exit " + ec + ")";
+      var ms = dsNum(o.duration_ms);
+      // no exit code in the record — report only what it actually says
+      return ms !== null ? "Command finished after " + dsDur(ms) : "Command finished";
+    }
+    if(et === "file.read")   return fp ? "Read a file: " + fp : "Read a file";
+    if(et === "file.write")  return fp ? "Wrote a file: " + fp : "Wrote a file";
+    if(et === "file.delete") return fp ? "Deleted a file: " + fp : "Deleted a file";
+    if(et === "session.start"){
+      var model = dsTrunc(o.model, 40);
+      return model ? "Session started on " + model : "Session started";
+    }
+    if(et === "session.end") return "Session ended";
+    if(et === "prompt.user"){
+      var pv = dsTrunc(o.content_preview, 110);
+      return pv ? "Operator sent a prompt: " + pv : "Operator sent a prompt";
+    }
+    if(et === "message.assistant"){
+      var mv = dsTrunc(o.content_preview, 110);
+      return mv ? "Agent replied: " + mv : "Agent replied";
+    }
+    if(et === "tool.call")   return tool ? "Called the " + tool + " tool" : "Called a tool";
+    if(et === "tool.result") return tool ? "The " + tool + " tool returned" : "A tool returned";
+    if(et === "network.indicator"){
+      var h = dsHost(o.url) || dsHost(o.value);
+      return h ? "Requested a URL: " + h : "Requested a URL";
+    }
+    var ctx = cmd || fp || dsTrunc(o.content_preview, 90) || dsHost(o.url) || tool;
+    if(et) return "Recorded a " + dsTrunc(et, 40) + " event" + (ctx ? ": " + ctx : "");
+    return ctx ? "Recorded an event: " + ctx : "Unrecognized record (event)";
+  }
+
+  function describe(o){
+    try {
+      if(o === null || typeof o !== "object" || Array.isArray(o)) return "Unrecognized record";
+      var rt = dsStr(o.record_type);
+
+      if(rt === "event") return dsEvent(o);
+
+      if(rt === "finding"){
+        var title = dsTrunc(o.title, 90), rule = dsTrunc(o.rule_id, 60);
+        if(title && rule) return title + " — matched " + rule;
+        if(title) return title;
+        if(rule)  return "Matched " + rule;
+        return "Recorded a finding";
+      }
+      if(rt === "enforcement"){
+        var dec = dsTrunc(o.decision, 40).toLowerCase();
+        var why = dsTrunc(o.deny_rule_id, 60) || dsTrunc(o.reason, 90);
+        if(dec === "deny" || dec === "block" || dec === "blocked")
+          return why ? "Blocked an action: " + why : "Blocked an action";
+        if(dec === "allow" || dec === "allowed")
+          return why ? "Allowed an action: " + why : "Allowed an action";
+        if(dec) return "Enforcement decision: " + dec + (why ? " (" + why + ")" : "");
+        return why ? "Enforcement decision: " + why : "Recorded an enforcement decision";
+      }
+      if(rt === "indicator"){
+        var ty = dsTrunc(o.type, 30), val = dsTrunc(o.value, 90), c = dsNum(o.count);
+        var head = "Saw " + (ty ? ty + " " : "") + (val || "an indicator");
+        return c === null ? head : head + ", " + c + " time" + (c === 1 ? "" : "s");
+      }
+      if(rt === "scan_summary"){
+        var st = dsTrunc(o.status, 40);
+        return st ? "Scan finished: " + st : "Scan finished";
+      }
+      if(rt === "diagnostic"){
+        var msg = dsTrunc(o.message, 140), lvl = dsTrunc(o.level, 30);
+        if(msg) return msg;
+        return lvl ? "Diagnostic (" + lvl + ")" : "Diagnostic record with no message";
+      }
+      if(rt) return "Unrecognized record (" + dsTrunc(rt, 40) + ")";
+      return "Unrecognized record (no record_type)";
+    } catch(e){
+      return "Unreadable record";
+    }
+  }
+  /* [describe:end] */
 
   function finish(desc, parsed, nBad, token, resetState, after){
     if(token !== loadToken){ loading = false; prog.hidden = true; return; }
@@ -508,6 +692,15 @@
     if(resetState){ range = null; kindFilter = ""; sel = -1; tlclear.hidden = true;
       detail.innerHTML = '<div class="placeholder">Select a record to inspect it.</div>'; }
     prog.hidden = true;
+
+    // A source served over HTTP can be polled, so stream it by default — the
+    // operator should not have to reach for a toggle to see a live session.
+    // A file opened from disk has no URL to poll, so it stays static.
+    if(!autoLive && served && desc.url){
+      autoLive = true;
+      setLive(true);
+      toast("Live — streaming new records every " + (POLL_MS/1000) + "s");
+    }
 
     if(!recs.length){
       land.hidden = false; head.hidden = true; qbar.hidden = true; main.hidden = true;
@@ -590,6 +783,32 @@
     return {terms:terms,free:free,negTerms:negTerms,neg:neg};
   }
 
+  /* Sorts the view index array only — recs stays in file order so r.i, eidx,
+     jumpTo and the .fresh range comparison keep working. Records with no
+     parseable timestamp (tms === 0) always land at the bottom in file order,
+     in both directions: they have no position on a time axis to claim. */
+  function cmpView(a,b){
+    var ra=recs[a], rb=recs[b];
+    if(!ra.tms||!rb.tms){
+      if(!ra.tms&&!rb.tms) return ra.i-rb.i;
+      return ra.tms?-1:1;
+    }
+    if(ra.tms!==rb.tms) return sortDesc?rb.tms-ra.tms:ra.tms-rb.tms;
+    return sortDesc?rb.i-ra.i:ra.i-rb.i;
+  }
+  function syncSort(){ $("sortLbl").textContent = sortDesc?"↓ newest":"↑ oldest"; }
+  $("sortBtn").addEventListener("click",function(){
+    sortDesc=!sortDesc;
+    syncSort();
+    var keep=sel;
+    apply();
+    var pos=keep>=0?view.indexOf(keep):-1;
+    if(pos>=0) listwrap.scrollTop=Math.max(0,pos*ROW-Math.floor(listwrap.clientHeight/2));
+    else listwrap.scrollTop=0;
+    paint();
+    toast(sortDesc?"Newest first":"Oldest first");
+  });
+
   function apply(){
     var q=parseQ(qEl.value), out=[], j;
     for(var i=0;i<recs.length;i++){
@@ -603,6 +822,7 @@
       if(ok) for(j=0;j<q.neg.length;j++) if(r.low.indexOf(q.neg[j])!==-1){ok=false;break;}
       if(ok) out.push(i);
     }
+    out.sort(cmpView);
     view=out;
     qhint.textContent=view.length.toLocaleString()+" / "+recs.length.toLocaleString();
     renderPills(q);
@@ -676,16 +896,16 @@
   });
 
   function rowHTML(r,hl){
-    var body=esc(trunc(r.body,170));
+    var body=esc(trunc(r.desc,200));
     if(hl) body=mark(body,hl);
-    var d=body.indexOf(" · ");
-    if(d>-1) body="<strong>"+body.slice(0,d)+"</strong>"+body.slice(d);
+    // event type stays visible as secondary context for schema-literate readers
+    var ev=r.etype?'<i class="ev">'+esc(trunc(r.etype,40))+'</i>':"";
     var isFresh = freshFrom>=0 && r.i>=freshFrom;
     return '<div class="row'+(r.i===sel?" sel":"")+(isFresh?" fresh":"")+(r.sev?" sv-"+esc(r.sev):"")+'" data-i="'+r.i+'">'+
       '<span class="ts">'+(r.ts?esc(r.ts.slice(11,19)):"—")+'</span>'+
       '<span class="kd k-'+esc(r.rt)+'">'+esc(r.rt)+'</span>'+
       '<span class="ag">'+esc(r.agent||"—")+'</span>'+
-      '<span class="bd">'+body+'</span></div>';
+      '<span class="bd"><strong>'+body+'</strong>'+ev+'</span></div>';
   }
   function mark(html,term){
     try { return html.replace(new RegExp("("+term.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+")","ig"),"<mark>$1</mark>"); }
@@ -721,7 +941,8 @@
   function showDetail(r){
     if(!r) return;
     var o=r.o,h="";
-    h+='<div class="dhead"><h2>'+esc(r.rule||r.etype||r.rt)+'</h2><div class="dmeta">';
+    h+='<div class="dhead"><h2>'+esc(r.rule||r.etype||r.rt)+'</h2>';
+    h+='<p class="dsum">'+esc(r.desc)+'</p><div class="dmeta">';
     h+=tag(r.rt,r.rt==="finding"?"hi":r.rt==="indicator"?"ok":"");
     if(r.sev) h+=tag(r.sev,(r.sev==="high"||r.sev==="critical")?"hi":r.sev==="medium"?"wa":"");
     if(o.confidence) h+=tag("conf "+s(o.confidence),"");
@@ -732,7 +953,7 @@
     if(o.title) h+='<span class="lbl">title</span><div style="font-size:13.5px;line-height:1.55">'+esc(s(o.title))+'</div>';
     if(o.description) h+='<span class="lbl">description</span><div style="font-size:12.5px;line-height:1.6;color:var(--dim)">'+esc(s(o.description))+'</div>';
     if(r.rt==="finding") h+='<span class="lbl">interpretation</span><div class="note">A finding is a <b>rule match</b>, not a confirmed incident. Pre-action hook records describe a <b>proposed</b> action — this does not prove it executed. <b>confidence</b> is parser certainty, not likelihood of malice.</div>';
-    var cmd=s(o.observed_command)||s(o.content_preview)||s(o.url)||s(o.file_path)||s(o.observed_file_path)||s(o.message);
+    var cmd=s(o.command)||s(o.observed_command)||s(o.content_preview)||s(o.url)||s(o.file_path)||s(o.observed_file_path)||s(o.message);
     if(cmd) h+='<span class="lbl">observed</span><div class="cmd">'+esc(cmd)+'</div>';
     if(Array.isArray(o.cited_event_ids)&&o.cited_event_ids.length){
       h+='<span class="lbl">cited events · '+o.cited_event_ids.length+'</span>';
@@ -983,6 +1204,7 @@
     if(e.key==="/"){ e.preventDefault(); qEl.focus(); qEl.select(); return; }
     if(e.key==="j"||e.key==="ArrowDown"){ e.preventDefault(); move(1); return; }
     if(e.key==="k"||e.key==="ArrowUp"){ e.preventDefault(); move(-1); return; }
+    if(e.key==="s"){ e.preventDefault(); $("sortBtn").click(); return; }
     if(e.key==="r"){ e.preventDefault(); doReload(); return; }
     if(e.key==="l"){ e.preventDefault(); $("live").click(); return; }
     if(e.key==="o"){ e.preventDefault(); openFile(); return; }
