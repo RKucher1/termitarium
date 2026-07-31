@@ -1,5 +1,100 @@
 # Changelog
 
+## 0.5.0 — 2026-07-31
+
+Session rollup. A finding explains itself and an event explains itself; a
+session did not, and the only way to understand one was to filter by
+`session_id` and scroll a thousand rows.
+
+- **`rollup()` — what one session did.** Narrow the view to a single session
+  and the detail pane summarizes it in place of the placeholder: span and
+  whether it terminated, commands proposed against results observed, tool
+  events, files read and written (deduplicated by path), findings by severity
+  and rule id, enforcement decisions by value, subagent activity, the endpoint
+  it ran on, and the prompt that started it. Pure, self-contained between
+  markers, and unit tested like `describe()` and `interpret()` before it.
+- **It refuses to tell you the session succeeded.** numbat's schema defines an
+  optional `exit_code`, but no record in the reference corpus carries one, so a
+  `command.result` in practice reports `duration_ms` and nothing more. Where
+  exit codes are absent the rollup says so; where only some records carry one
+  it states the coverage rather than going quiet, so a single code cannot imply
+  the rest were accounted for. A command with no matching result is stated as
+  *no result was recorded*, never as a failure — and whether it might still be
+  running is decided per session, because an unpaired command at the tail of a
+  session with no recorded end may genuinely be in flight. Absent findings are
+  reported as *no finding records in this file*, not as a clean run: the viewer
+  reads a file and never observed numbat evaluate anything.
+- **Findings lead, and they name what they hit.** The rollup renders each
+  rule's title, severity, and the file or command it fired on — not just a rule
+  id — because the list it summarizes was already more informative than that.
+  Counts are not terminal: every one that can name its records is a button that
+  filters to them, so *5 findings* is a step rather than a full stop.
+  Path counts are labelled *distinct files*, since they deduplicate by path
+  while the cells beside them count events.
+- **The one honest failure signal is used.** numbat tags a result `tool_error`
+  only from a field the agent itself set to mark failure. The rollup counts
+  those and says outright that the absence of the tag on the others is not
+  evidence they succeeded.
+- **Session boundaries are counted, not collapsed to a flag.** numbat maps
+  `SubagentStart`/`SubagentStop` onto `session.start`/`session.end` and copies
+  `session_id` from the agent rather than minting one, so every parallel
+  dispatch adds a boundary pair to its *parent* session. One session in the
+  author's corpus carries 29 `session.start` and 36 `session.end` records, of
+  which exactly one start and *no* ends are its own — the rest belong to
+  subagents. Treating "a `session.end` exists" as terminated would have called
+  that session finished 36 times over when it never recorded an end at all.
+  Only boundaries carrying no `sub_agent` decide the lifecycle, the state is
+  named after the record (`session.end recorded`) rather than given a verdict
+  word, and repeated root boundaries are reported as a possible resume rather
+  than silently flattened.
+- **Session list.** **⧉ Browse sessions** shows every session in the file with
+  its agent, span, command count, findings, terminated state and opening
+  prompt; clicking one isolates it. Rollups are computed on demand and cached
+  per session, never for every session up front — one session in the reference
+  corpus holds 76% of its records.
+- **Rendering defects, found only in a real browser.** The session list
+  inherited `white-space:nowrap` from `.btn`, letting a long prompt widen the
+  pane and scroll the whole layout sideways; its prompt line was an inline
+  `<span>`, on which `overflow`/`text-overflow` are ignored entirely, so it
+  never ellipsised; and its findings chip was out-specified by a neighbouring
+  rule, rendering the same grey as everything else — so in a security tool the
+  one session with five high-severity findings looked identical to the rest.
+  Live polling also reset the detail pane's scroll on every arrival, so reading
+  a running session's caveats scrolled back to the top every few seconds. All
+  fixed and re-verified at two viewport widths. A single-timestamp session
+  reports *a single instant* rather than "over 0 ms".
+- **Nothing in the pane is green.** Verdigris is this viewer's success colour,
+  and a pane whose argument is that it cannot certify a session was clean had
+  been using it for the "no findings" panel and for the word "ended". Both are
+  now neutral.
+- **`esc()` is not enough for a class attribute.** It escapes quotes and angle
+  brackets but leaves spaces, so a record-derived `severity` of
+  `"critical sv-low"` injected a second class token — and because the
+  low-severity rule is declared later at equal specificity, a hostile finding
+  could paint itself the muted colour an operator triages past. A new `cls()`
+  sanitiser now guards every class attribute built from record content,
+  including the record list's `sv-`/`k-` classes and `tag()`, which had the
+  same shape. A malformed severity now renders with no severity colour at all
+  rather than one of its choosing, and the odd value stays visible as a tell.
+- **The session list no longer degrades with session count.** It rescanned
+  every record once per session, so a file with many distinct `session_id`s
+  was O(sessions × records) and rebuilt on every live poll — 20,000 sessions
+  froze the main thread for ~2s each time, which is precisely the wrong
+  failure mode for a forensic view under an agent that is still writing.
+  Records are now bucketed by session in one pass; 8,010 sessions build in
+  33ms and rebuild in 9ms. The list caps at 200 rows and the per-session rule
+  list at 40, both saying what they dropped.
+- **A crafted `session_id` can no longer produce a silently dead button.** The
+  query language splits on whitespace and reads a leading `-` as negation, so
+  an id containing either cannot round-trip through it — `"atkW1 -atkW1"`
+  filtered to nothing while looking like a normal row. Such ids now report why
+  they cannot be filtered instead of appearing to do nothing.
+- **Two long-standing bugs in the neighbouring pure blocks**, found while
+  checking the three for consistency: `dsTrunc()` could cut between a surrogate
+  pair and emit a lone half — rendering as U+FFFD on any list row with an emoji
+  — and `ipStr()` lacked the `isFinite` guard its two siblings have, so a
+  non-finite number reached the operator as "Infinity". Both fixed, both tested.
+
 ## 0.4.1 — 2026-07-31
 
 - **The viewer moved out of the directory numbat watches.** Deploying it into

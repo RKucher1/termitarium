@@ -20,13 +20,13 @@ will move; check \`CHANGELOG.md\` for the version this tracks.
 
 | | |
 |---|---|
-| `viewer/viewer.html` | Single-file record viewer: plain-language descriptions, per-finding interpretation, virtual scrolling, query language, timeline scrubbing, cited-event resolution |
+| `viewer/viewer.html` | Single-file record viewer: plain-language descriptions, per-finding interpretation, session rollups, virtual scrolling, query language, timeline scrubbing, cited-event resolution |
 | `numbatd/main.go` | ~150-line Go server that serves the viewer and whitelisted `*.ndjson` over loopback |
 | `prune/numbat-prune` | Retention tool: archive-before-delete, atomic replace, never loses a record |
 | `install.sh` | Per-user install, builds the binary, wires launchd |
 | `tools/gen-rule-catalog.js` | Maintainer tool: regenerates the viewer's embedded rule catalog from numbat's rule YAML. Never needed at runtime |
 | `tools/gen-favicon.py` | Maintainer tool: regenerates `viewer/favicon.png` from the same geometry as the SVG |
-| `test/viewer-logic.js` | Unit tests for the viewer's description and interpretation logic — `node test/viewer-logic.js`, no dependencies |
+| `test/viewer-logic.js` | Unit tests for the viewer's description, interpretation and session-rollup logic — `node test/viewer-logic.js`, no dependencies |
 | `test/install-logic.sh` | Tests for `install.sh`: legacy migration, idempotency, uninstall — `bash test/install-logic.sh` |
 
 ## Install
@@ -79,6 +79,39 @@ streaming it live.
   window.
 - **Cited events** — findings resolve `cited_event_ids` into jump buttons, so a
   sequence match is two clicks from the commands behind it.
+- **Session rollup** — narrow the view to one session and the detail pane
+  summarizes it instead of showing the placeholder. Findings come first, each
+  with its title, severity, and the file or command it fired on; then commands
+  proposed against results observed, distinct files read and written, tool
+  activity, enforcement decisions, subagent activity, and the prompt that
+  started it. Every count that can name its records is a button that filters to
+  them, so a finding count is a step rather than a full stop.
+  **⧉ Browse sessions** lists every session in the file — agent, span, commands
+  proposed, findings, lifecycle, and its opening prompt — and clicking one
+  isolates it. Rollups are computed on demand and cached, never for every
+  session up front.
+
+  What it will not tell you is whether the session *succeeded*. numbat's schema
+  defines an optional `exit_code`, but no record in the reference corpus
+  carries one, so a `command.result` reports a duration and nothing else.
+  Rather than invent a verdict the rollup reports what was proposed and what
+  was observed, names the gaps, and leaves the judgement to you. A command with
+  no matching result is reported as *no result was recorded* — never as a
+  failure. The one real failure signal is the `tool_error` tag, which numbat
+  sets only from a field the agent itself used to mark failure; the rollup
+  counts it and states plainly that its absence on the others is not evidence
+  they succeeded. Nothing in the pane is green, because nothing in it can
+  certify that a session was clean.
+
+  Session boundaries are counted rather than collapsed to a flag, because they
+  are not unique. numbat maps `SubagentStart`/`SubagentStop` onto
+  `session.start`/`session.end` and copies `session_id` straight from the
+  agent, so every parallel dispatch adds a boundary pair to its *parent*
+  session — one real session in the reference corpus carries 29 `session.start`
+  and 36 `session.end` records, of which one start and no ends are its own.
+  Only boundaries with no `sub_agent` speak to whether the session ended, and
+  the state is named after the record (`session.end recorded`) rather than
+  given a verdict word like "ended".
 - **Live** — **on by default.** A source served over loopback can be polled, so
   the viewer streams it without you reaching for a toggle; a file opened from
   disk has no URL to poll and stays static. Polls with HEAD requests and

@@ -171,6 +171,64 @@
   .placeholder{padding:34px 20px;color:var(--dust);font-family:var(--mono);font-size:11.5px;line-height:2.1}
   .placeholder b{color:var(--dim);font-weight:400}
 
+  /* session rollup */
+  /* Cell separators are borders, not a background showing through a 1px gap:
+     with auto-fit columns the last row is rarely full, and a gap-background
+     leaves a filled dead rectangle where the missing cells would be. */
+  .rugrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:0;background:var(--bark);border:1px solid var(--line);border-radius:3px;overflow:hidden}
+  .rucell{background:var(--bark);padding:8px 10px;border-right:1px solid var(--line);border-top:1px solid var(--line)}
+  .rucell:first-child{border-top:0}
+  .rucell b{display:block;font-family:var(--mono);font-size:15px;font-weight:500;line-height:1.3;color:var(--band)}
+  .rucell i{font-family:var(--mono);font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--dust);font-style:normal}
+  .rucell.wa b{color:var(--amber)}
+  .rucell.hi b{color:var(--rufous)}
+  button.rucell{font:inherit;text-align:left;cursor:pointer;border-left:0;border-bottom:0;color:inherit;transition:.14s}
+  button.rucell:hover{background:var(--ridge)}
+  button.rucell:focus-visible{outline:2px solid var(--verdigris);outline-offset:-2px}
+  /* A count the operator cannot reach is a dead end; these carry a query. */
+  .btn.lnk{display:block;width:100%;max-width:100%;text-align:left;white-space:normal;overflow:hidden;padding:7px 10px;line-height:1.5}
+  .rufind{list-style:none;padding-left:0;margin:0}
+  .rufind li{margin:0 0 5px}
+  .rufind .rt{color:var(--band);font-size:12.5px}
+  .rufind .rs{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase}
+  .rufind .rs.sv-high,.rufind .rs.sv-critical{color:var(--rufous)}
+  .rufind .rs.sv-medium{color:var(--amber)}
+  .rufind .rs.sv-low{color:var(--dust)}
+  .rufind .rc{font-family:var(--mono);font-size:10px;color:var(--dust)}
+  .rufind .rid{display:block;font-family:var(--mono);font-size:10px;color:var(--dust);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+  .rucav{margin-top:18px}
+  .rucav>summary{font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--dust);cursor:pointer;padding:4px 0;list-style:revert}
+  .rucav>summary:hover{color:var(--dim)}
+  .rucav[open]>summary{margin-bottom:8px}
+  .ruline{font-family:var(--mono);font-size:11.5px;line-height:1.8;color:var(--dim)}
+  .ruline b{color:var(--band);font-weight:500}
+  /* Neutral, not green. This pane's whole argument is that it cannot certify a
+     session was clean, so nothing in it should read as an all-clear. */
+  .rufree{border-left:2px solid var(--line2);background:rgba(237,230,218,.035);padding:9px 12px;font-size:12px;line-height:1.6;color:var(--dim);border-radius:0 2px 2px 0}
+  .rufree b{color:var(--band);font-weight:600}
+  .rulist{margin:0;padding-left:16px;font-size:12px;line-height:1.7;color:var(--dim)}
+  .rulist li{margin:2px 0}
+  .rulist code{font-family:var(--mono);font-size:11px;color:var(--band)}
+  /* .btn sets white-space:nowrap, which would let a long prompt widen the
+     button and scroll the whole pane sideways — override it here. .s2 must be
+     a block for overflow/ellipsis to apply at all: they are ignored on a
+     non-replaced inline element. */
+  .sesslist{display:block;width:100%;max-width:100%;text-align:left;margin-bottom:6px;padding:9px 11px;line-height:1.5;white-space:normal;overflow:hidden}
+  .sesslist .s1{font-family:var(--mono);font-size:11px;color:var(--band);display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;min-width:0}
+  .sesslist .s1>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
+  /* em.fi / em.op must out-specify the plain em above them, or a session with
+     findings looks identical to one without — the one distinction that matters
+     most in this list. */
+  .sesslist .s1 em{font-style:normal;color:var(--dust);font-size:10px;flex:0 0 auto}
+  .sesslist .s1 em.fi{color:var(--rufous)}
+  /* amber, not verdigris: showRollup tags this same string .tag.wa, and an
+     unterminated session is a caveat rather than good news */
+  .sesslist .s1 em.op{color:var(--amber)}
+  .sesslist.hasfind{border-left:2px solid var(--rufous)}
+  .sesslist .s2{display:block;font-size:11.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px;max-width:100%}
+  .sesslist .op{color:var(--verdigris)}
+  .sesslist .fi{color:var(--rufous)}
+
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--band);color:var(--bark);padding:9px 18px;border-radius:3px;font-size:12.5px;font-weight:600;transition:transform .22s cubic-bezier(.2,.8,.3,1);z-index:60;pointer-events:none;max-width:80vw;text-align:center}
   .toast.show{transform:translateX(-50%) translateY(0)}
   .toast.err{background:var(--rufous);color:#fff}
@@ -258,6 +316,7 @@
 
   var recs=[], view=[], sel=-1, handle=null, bad=0, eidx=null;
   var range=null, kindFilter="", loadToken=0, loading=false, lastDesc=null;
+  var paneMode="auto"; // "auto" — record or session rollup; "sessions" — the list
   var sortDesc=true;
   var served = (location.protocol === "http:" || location.protocol === "https:");
   var liveOn=false, liveTimer=null, lastSig="", freshFrom=-1, freshTimer=null, autoLive=false;
@@ -656,7 +715,13 @@
   }
   function dsTrunc(v, n){
     var t = dsStr(v).replace(/\s+/g, " ").trim();
-    return t.length > n ? t.slice(0, n - 1) + "…" : t;
+    if(t.length <= n) return t;
+    // Slicing between a surrogate pair leaves a lone half, which renders as
+    // U+FFFD — and this runs on every row in the list.
+    var cut = n - 1;
+    var c = t.charCodeAt(cut - 1);
+    if(c >= 0xD800 && c <= 0xDBFF) cut--;
+    return t.slice(0, cut) + "…";
   }
   function dsNum(v){ return (typeof v === "number" && isFinite(v)) ? v : null; }
   function dsList(v, n){
@@ -799,7 +864,10 @@
   function ipStr(v){
     if(v === undefined || v === null) return "";
     if(typeof v === "string") return v;
-    if(typeof v === "number" || typeof v === "boolean") return String(v);
+    // Infinity and NaN are not values to show an operator; dsStr and ruStr
+    // both guard this and this one did not.
+    if(typeof v === "number") return isFinite(v) ? String(v) : "";
+    if(typeof v === "boolean") return String(v);
     return "";
   }
   function ipClean(v){ return ipStr(v).replace(/\s+/g, " ").trim(); }
@@ -924,11 +992,348 @@
   }
   /* [interpret:end] */
 
+  /* ═════ rollup ═════
+     What one session did, derived from its own records. Same discipline as
+     describe() and interpret(): pure, no DOM, no globals, never throws, and it
+     returns data rather than markup so esc() stays the single escape point.
+
+     The hard rule here is that nothing may imply success. numbat's schema
+     defines an optional exit_code, but Claude Code's transcripts do not carry
+     one, so most corpora have no outcome field at all — command.result records
+     a duration and nothing more. Where exit_code is absent this reports what
+     was proposed and what was observed and lets the operator judge. The one
+     real failure signal is the tool_error tag, which numbat sets only from a
+     field the agent itself set to mark failure; its absence is never evidence
+     of success, and the returned shape keeps those two facts distinct.
+
+     Session boundaries are counted, not collapsed to a flag. numbat maps
+     SubagentStart/SubagentStop onto session-start/session-end and copies
+     session_id straight from the agent, so a parent session accumulates one
+     boundary pair per subagent dispatch on top of its own. Boundary events
+     carrying sub_agent are therefore counted separately from root ones, and
+     only root events speak to whether this session ended. */
+  /* [rollup:begin] */
+  function ruStr(v){
+    if(v === undefined || v === null) return "";
+    if(typeof v === "string") return v;
+    if(typeof v === "number") return isFinite(v) ? String(v) : "";
+    if(typeof v === "boolean") return String(v);
+    return "";
+  }
+  function ruClean(v){ return ruStr(v).replace(/\s+/g, " ").trim(); }
+  function ruTrunc(v, n){
+    var t = ruClean(v);
+    if(t.length <= n) return t;
+    var cut = n - 1;
+    // Never slice between a surrogate pair — that renders as U+FFFD.
+    var c = t.charCodeAt(cut - 1);
+    if(c >= 0xD800 && c <= 0xDBFF) cut--;
+    return t.slice(0, cut) + "…";
+  }
+  function ruMs(v){
+    var t = ruClean(v);
+    if(!t) return 0;
+    var p = Date.parse(t);
+    return isNaN(p) ? 0 : p;
+  }
+  function ruInt(v){
+    return (typeof v === "number" && isFinite(v) && Math.floor(v) === v) ? v : null;
+  }
+  // Notes render beside grouped numerals; an ungrouped 3097 next to a rendered
+  // 3,097 reads as a different quantity.
+  function ruN(n){
+    try { return n.toLocaleString(); } catch(e){ return String(n); }
+  }
+  function ruBump(map, key){
+    var k = ruClean(key);
+    if(!k) return;
+    map[k] = (map[k] || 0) + 1;
+  }
+  function ruBy(a, b){
+    if(a.count !== b.count) return b.count - a.count;
+    return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+  }
+  function ruRank(map){
+    var out = [], k;
+    for(k in map) if(Object.prototype.hasOwnProperty.call(map, k)) out.push({ name:k, count:map[k] });
+    out.sort(ruBy);
+    return out;
+  }
+  // Same ranking over richer entries — a rule keeps its title and severity so
+  // the summary need not be less informative than the records it summarises.
+  function ruRankOf(map){
+    var out = [], k;
+    for(k in map) if(Object.prototype.hasOwnProperty.call(map, k)) out.push(map[k]);
+    out.sort(ruBy);
+    return out;
+  }
+  function ruNoteRule(map, id, title, sev){
+    var k = ruClean(id);
+    if(!k) return;
+    if(!map[k]) map[k] = { name:k, count:0, title:"", sev:"" };
+    map[k].count++;
+    if(!map[k].title){ var t = ruTrunc(title, 120); if(t) map[k].title = t; }
+    if(!map[k].sev){ var s = ruClean(sev); if(s) map[k].sev = s; }
+  }
+  function ruHasTag(o, tag){
+    if(!o || !Array.isArray(o.tags)) return false;
+    for(var i = 0; i < o.tags.length; i++) if(ruClean(o.tags[i]) === tag) return true;
+    return false;
+  }
+
+  function rollup(records, sessionId){
+    try {
+      var list = Array.isArray(records) ? records : [];
+      var sid  = ruClean(sessionId);
+
+      var agents = Object.create(null), hosts = Object.create(null);
+      var subAgents = Object.create(null), sources = Object.create(null);
+      var sevs = Object.create(null), rules = Object.create(null);
+      var decisions = Object.create(null);
+      var readPaths = Object.create(null), writePaths = Object.create(null);
+      var execIds = Object.create(null), resultIds = Object.create(null);
+
+      var deviceId = "", model = "", prompt = "", promptMs = 0, promptSeen = false;
+      var first = 0, last = 0, undated = 0, counted = 0;
+      var rootStart = 0, rootEnd = 0, subStart = 0, subEnd = 0;
+      var nExec = 0, nResult = 0, nToolCall = 0, nToolResult = 0;
+      var nRead = 0, nWrite = 0, nPrompt = 0, nAssistant = 0;
+      var nFinding = 0, nEnforce = 0, nErrored = 0;
+      var nWithExit = 0, nNonZeroExit = 0;
+      var anonExec = 0, anonResult = 0;
+
+      for(var i = 0; i < list.length; i++){
+        var o = list[i];
+        if(o === null || typeof o !== "object" || Array.isArray(o)) continue;
+        counted++;
+
+        var rt = ruClean(o.record_type), et = ruClean(o.event_type);
+        var sub = ruClean(o.sub_agent);
+
+        ruBump(agents, o.source_agent);
+        ruBump(sources, o.source_type);
+        if(sub) ruBump(subAgents, sub);
+        if(o.endpoint && typeof o.endpoint === "object" && !Array.isArray(o.endpoint)){
+          ruBump(hosts, o.endpoint.hostname);
+          if(!deviceId) deviceId = ruTrunc(o.endpoint.device_id, 80);
+        }
+
+        // Timestamps: findings stamp detected_at instead of timestamp.
+        var ms = ruMs(o.timestamp) || ruMs(o.detected_at);
+        if(ms){
+          if(!first || ms < first) first = ms;
+          if(!last  || ms > last)  last  = ms;
+        } else undated++;
+
+        if(ruHasTag(o, "tool_error")) nErrored++;
+
+        var xc = ruInt(o.exit_code);
+        if(xc !== null){ nWithExit++; if(xc !== 0) nNonZeroExit++; }
+
+        if(rt === "finding"){
+          nFinding++;
+          ruBump(sevs, o.severity);
+          // What the finding actually points at, so the summary can name the
+          // file or command rather than only the rule that matched it.
+          var tgt = ruClean(o.observed_file_path) || ruClean(o.observed_command) ||
+                    ruClean(o.observed_url) || ruClean(o.observed_mcp_tool);
+          var rid = ruClean(o.rule_id);
+          if(rid){
+            ruNoteRule(rules, rid, o.title, o.severity);
+            if(tgt && !rules[rid].target) rules[rid].target = ruTrunc(tgt, 120);
+          } else if(Array.isArray(o.rule_ids)){
+            for(var q = 0; q < o.rule_ids.length; q++) ruNoteRule(rules, o.rule_ids[q], o.title, o.severity);
+          }
+          continue;
+        }
+        if(rt === "enforcement"){
+          nEnforce++;
+          ruBump(decisions, ruClean(o.decision).toLowerCase() || "unspecified");
+          continue;
+        }
+
+        if(et === "session.start"){
+          if(sub) subStart++; else rootStart++;
+          if(!model) model = ruTrunc(o.model, 60);
+          continue;
+        }
+        if(et === "session.end"){   if(sub) subEnd++;   else rootEnd++;   continue; }
+
+        if(et === "command.exec"){
+          nExec++;
+          var eid = ruClean(o.tool_call_id);
+          if(eid) execIds[eid] = 1; else anonExec++;
+          continue;
+        }
+        if(et === "command.result"){
+          nResult++;
+          var rid2 = ruClean(o.tool_call_id);
+          if(rid2) resultIds[rid2] = 1; else anonResult++;
+          continue;
+        }
+        if(et === "tool.call"){ nToolCall++; continue; }
+        if(et === "tool.result"){ nToolResult++; continue; }
+        if(et === "file.read"){
+          nRead++;
+          var rp = ruClean(o.file_path) || ruClean(o.observed_file_path);
+          if(rp) ruBump(readPaths, rp);
+          continue;
+        }
+        if(et === "file.write"){
+          nWrite++;
+          var wp = ruClean(o.file_path) || ruClean(o.observed_file_path);
+          if(wp) ruBump(writePaths, wp);
+          continue;
+        }
+        if(et === "prompt.user"){
+          nPrompt++;
+          // The originating prompt is the earliest one by time, not by file
+          // order — one session records session.end before its prompt. An
+          // undated prompt only fills the slot while nothing dated has.
+          var pv = ruTrunc(o.content_preview, 240);
+          if(pv){
+            if(!promptSeen || (ms && (!promptMs || ms < promptMs))){
+              prompt = pv;
+              promptMs = ms;
+              promptSeen = true;
+            }
+          }
+          continue;
+        }
+        if(et === "message.assistant"){ nAssistant++; continue; }
+      }
+
+      // Unpaired execs: a command.exec whose tool_call_id never got a result.
+      // Counted by id, so an exec with no id cannot be paired either way and is
+      // reported separately rather than silently assumed matched.
+      var unpaired = 0, k;
+      for(k in execIds) if(Object.prototype.hasOwnProperty.call(execIds, k) && !resultIds[k]) unpaired++;
+      var orphanResults = 0;
+      for(k in resultIds) if(Object.prototype.hasOwnProperty.call(resultIds, k) && !execIds[k]) orphanResults++;
+
+      // Lifecycle state, from ROOT boundary events only. Subagent boundaries
+      // share this session_id and say nothing about whether the session ended.
+      var state;
+      if(rootStart && rootEnd)      state = "ended";
+      else if(rootStart)            state = "open";
+      else if(rootEnd)              state = "end-only";
+      else                          state = "unrecorded";
+
+      var uniqRead = 0, uniqWrite = 0;
+      for(k in readPaths)  if(Object.prototype.hasOwnProperty.call(readPaths, k))  uniqRead++;
+      for(k in writePaths) if(Object.prototype.hasOwnProperty.call(writePaths, k)) uniqWrite++;
+
+      var subList = ruRank(subAgents);
+      // Two different counts, deliberately not merged: how many boundary events
+      // a subagent contributed, and how many records of any kind carry a
+      // sub_agent. numbat stamps sub_agent on every event a subagent produces,
+      // so the second is far larger and means something else entirely.
+      var nSubBoundary = subStart + subEnd, nSubRecords = 0;
+      for(var z = 0; z < subList.length; z++) nSubRecords += subList[z].count;
+
+      /* Caveats. Each is gated on something actually observed, and each states
+         what the record does not establish rather than offering advice. */
+      var notes = [];
+
+      // Coverage, always stated. Suppressing this the moment a single record
+      // carries an exit code would let one result out of a thousand imply the
+      // rest were accounted for.
+      if(!nWithExit)
+        notes.push("No record in this session carries an exit code, so whether any command succeeded cannot be determined from these records. " +
+                   "command.result reports a duration and nothing more.");
+      else if(nWithExit < nResult)
+        notes.push("Exit codes are present on " + ruN(nWithExit) + " of " + ruN(nResult) + " command results. " +
+                   "For the remaining " + ruN(nResult - nWithExit) + ", whether the command succeeded cannot be determined from these records.");
+
+      if(nErrored)
+        notes.push(ruN(nErrored) + " record" + (nErrored === 1 ? " was" : "s were") + " tagged tool_error, which numbat sets only from a field the agent itself used to mark failure. " +
+                   "The absence of that tag on the others is not evidence that they succeeded.");
+
+      // Whether "still running" is even available as a reading depends on this
+      // session: an unpaired exec that is the last thing recorded in a session
+      // with no recorded end may well still be in flight.
+      if(unpaired)
+        notes.push(ruN(unpaired) + " command" + (unpaired === 1 ? "" : "s") + " proposed here " + (unpaired === 1 ? "has" : "have") + " no matching command.result. " +
+                   "That means no result was recorded. It does not show that the command failed" +
+                   (state === "open"
+                     ? ", and because this session has no recorded end, a command may still be running."
+                     : ", only that this file does not record how it ended."));
+
+      if(orphanResults)
+        notes.push(ruN(orphanResults) + " result" + (orphanResults === 1 ? "" : "s") + " reference a command this session did not record, " +
+                   "so the proposing event is missing from this file.");
+
+      if(anonExec || anonResult)
+        notes.push("Some command events carry no tool_call_id and cannot be paired in either direction.");
+
+      // The counts are already rendered in the subagents and lifecycle
+      // sections; these notes carry only what those numbers mean.
+      if(nSubRecords)
+        notes.push("numbat maps subagent start/stop onto session start/end and copies session_id from the agent, " +
+                   "so subagent work is recorded inside this session rather than as a session of its own.");
+
+      if(subStart !== subEnd)
+        notes.push("Subagent starts and ends do not balance. numbat does not correlate the two, and sub_agent holds an agent type " +
+                   "on some records and an opaque id on others, so subagent spans cannot be paired from these records.");
+
+      if(rootStart > 1 || rootEnd > 1)
+        notes.push("This session's own start/end boundaries repeat. numbat emits one per hook invocation and does not correlate them, " +
+                   "so this may be a resumed session rather than several runs.");
+
+      if(state === "open")
+        notes.push("The session may still be running, or it may have been cut off before the hook that records the end could fire.");
+      if(state === "end-only")
+        notes.push("numbat was likely installed part-way through this session, so the records before it began watching are not here.");
+      if(state === "unrecorded")
+        notes.push("Without either boundary, this file does not show when the session began or whether it finished.");
+
+      if(sources["artifact"])
+        notes.push("Some records were reconstructed from an on-disk artifact after the fact. A session.end from that path is an end-of-file marker, not evidence the session ended.");
+
+      if(undated)
+        notes.push(ruN(undated) + " record" + (undated === 1 ? " has" : "s have") + " no usable timestamp and " + (undated === 1 ? "is" : "are") + " excluded from the span.");
+
+      return {
+        id: sid,
+        records: counted,
+        agents: ruRank(agents),
+        hosts: ruRank(hosts),
+        deviceId: deviceId || null,
+        model: model || null,
+        prompt: prompt || null,
+        span: { from: first || null, to: last || null,
+                ms: (first && last && last >= first) ? (last - first) : null,
+                undated: undated },
+        lifecycle: { state: state, rootStarts: rootStart, rootEnds: rootEnd,
+                     subStarts: subStart, subEnds: subEnd },
+        volume: { execs: nExec, results: nResult, unpaired: unpaired, orphanResults: orphanResults,
+                  toolCalls: nToolCall, toolResults: nToolResult,
+                  reads: nRead, uniqueReads: uniqRead,
+                  writes: nWrite, uniqueWrites: uniqWrite,
+                  prompts: nPrompt, assistantMessages: nAssistant },
+        outcome: { errored: nErrored, withExitCode: nWithExit, nonZeroExit: nNonZeroExit },
+        findings: { total: nFinding, bySeverity: ruRank(sevs), rules: ruRankOf(rules) },
+        files: { read: ruRank(readPaths), written: ruRank(writePaths) },
+        enforcement: { total: nEnforce, decisions: ruRank(decisions) },
+        subAgents: subList,
+        subAgentRecords: nSubRecords,
+        notes: notes
+      };
+    } catch(e){
+      return null;
+    }
+  }
+  /* [rollup:end] */
+
   function finish(desc, parsed, nBad, token, resetState, after){
     if(token !== loadToken){ loading = false; prog.hidden = true; return; }
     loading = false;
     recs = parsed; bad = nBad; eidx = null; lastDesc = desc;
-    if(resetState){ range = null; kindFilter = ""; sel = -1; tlclear.hidden = true;
+    // recs was replaced wholesale, so every cached rollup is stale. Live
+    // polling re-parses every few seconds and a running session's counts must
+    // move with it.
+    rollupCache = Object.create(null); sidIndex = null; sidOrder = null;
+    if(resetState){ range = null; kindFilter = ""; sel = -1; tlclear.hidden = true; paneMode = "auto";
       detail.innerHTML = '<div class="placeholder">Select a record to inspect it.</div>'; }
     prog.hidden = true;
 
@@ -1070,6 +1475,7 @@
     emptyEl.hidden = view.length>0;
     if(!view.length) emptyEl.innerHTML="No records match these filters.<br>Press <kbd>esc</kbd> to clear.";
     drawTL();
+    refreshPane();
   }
 
   function renderPills(q){
@@ -1101,6 +1507,9 @@
   var qt=null;
   qEl.addEventListener("input",function(){
     if(qt) clearTimeout(qt);
+    // Typing a new filter is a request to see its result, so it takes the pane
+    // back from the session list.
+    paneMode="auto";
     qt=setTimeout(function(){ qt=null; listwrap.scrollTop=0; apply(); },130);
   });
 
@@ -1140,9 +1549,9 @@
     // event type stays visible as secondary context for schema-literate readers
     var ev=r.etype?'<i class="ev">'+esc(trunc(r.etype,40))+'</i>':"";
     var isFresh = freshFrom>=0 && r.i>=freshFrom;
-    return '<div class="row'+(r.i===sel?" sel":"")+(isFresh?" fresh":"")+(r.sev?" sv-"+esc(r.sev):"")+'" data-i="'+r.i+'">'+
+    return '<div class="row'+(r.i===sel?" sel":"")+(isFresh?" fresh":"")+(r.sev?" sv-"+cls(r.sev):"")+'" data-i="'+r.i+'">'+
       '<span class="ts">'+(r.tms?esc(fmtHMS(r.tms)):(r.ts?esc(r.ts.slice(11,19)):"—"))+'</span>'+
-      '<span class="kd k-'+esc(r.rt)+'">'+esc(r.rt)+'</span>'+
+      '<span class="kd k-'+cls(r.rt)+'">'+esc(r.rt)+'</span>'+
       '<span class="ag">'+esc(r.agent||"—")+'</span>'+
       '<span class="bd"><strong>'+body+'</strong>'+ev+'</span></div>';
   }
@@ -1159,6 +1568,7 @@
 
   function select(i){
     if(i<0||i>=recs.length) return;
+    paneMode="auto"; // an explicit record choice takes the pane back from the list
     sel=i;
     var kids=rowsEl.children;
     for(var c=0;c<kids.length;c++) kids[c].classList.toggle("sel",parseInt(kids[c].getAttribute("data-i"),10)===i);
@@ -1212,6 +1622,393 @@
     return h+'</div>';
   }
 
+  /* ═════ session rollup — render ═════
+     rollup() returns data only, so every string below goes through esc() here
+     and esc() stays the single escape point.
+
+     Rollups are computed on demand and cached per session id, never for every
+     session up front: one session in the reference corpus holds 76% of its
+     records, so eager computation would pay that cost on every filter change
+     for a pane the operator may not be looking at. */
+  var rollupCache = Object.create(null), sidIndex = null, sidOrder = null;
+
+  // Bucket every record by session once, not once per session. Rescanning all
+  // records for each session made the list O(sessions × records) — a file with
+  // 20,000 distinct session ids froze the main thread for ~2s on every live
+  // poll, which is the wrong failure mode for a forensic view.
+  function sessionIndex(){
+    if(sidIndex) return sidIndex;
+    sidIndex = Object.create(null); sidOrder = [];
+    for(var i = 0; i < recs.length; i++){
+      var s = recs[i].sid;
+      if(!s) continue;
+      if(!sidIndex[s]){ sidIndex[s] = []; sidOrder.push(s); }
+      sidIndex[s].push(recs[i].o);
+    }
+    return sidIndex;
+  }
+  function sessionRollup(sid){
+    if(!sid) return null;
+    if(Object.prototype.hasOwnProperty.call(rollupCache, sid)) return rollupCache[sid];
+    var idx = sessionIndex();
+    var r = rollup(Object.prototype.hasOwnProperty.call(idx, sid) ? idx[sid] : [], sid);
+    rollupCache[sid] = r;
+    return r;
+  }
+
+  // The pane shows a rollup whenever the current view has narrowed to exactly
+  // one session, however the operator got there — a session: query, the
+  // isolate button, or a timeline drag that happens to land inside one.
+  function loneSession(){
+    var sid = null;
+    for(var i = 0; i < view.length; i++){
+      var s = recs[view[i]].sid;
+      if(!s) continue;
+      if(sid === null) sid = s;
+      else if(sid !== s) return null;
+    }
+    return sid;
+  }
+
+  function rvSpan(ms){
+    if(typeof ms !== "number" || !isFinite(ms)) return "";
+    if(ms < 1000) return ms + " ms";
+    var sec = Math.round(ms / 1000);
+    if(sec < 60) return sec + "s";
+    var min = Math.floor(sec / 60), rs = sec % 60;
+    if(min < 60) return min + "m " + rs + "s";
+    var hr = Math.floor(min / 60), rm = min % 60;
+    return hr + "h " + rm + "m";
+  }
+  // A count the operator cannot reach is a dead end, so every tile that can
+  // name the records behind it becomes a button carrying the query that
+  // selects them. data-q is escaped like any other attribute value.
+  function rvCell(v, label, cls, q){
+    var body = '<b>'+esc(typeof v === "number" ? v.toLocaleString() : v)+'</b><i>'+esc(label)+'</i>';
+    return q ? '<button type="button" class="rucell act '+(cls||"")+'" data-q="'+esc(q)+'" title="Show these records">'+body+'</button>'
+             : '<div class="rucell '+(cls||"")+'">'+body+'</div>';
+  }
+  function rvNames(arr, n){
+    var parts = [];
+    for(var i = 0; i < arr.length && i < n; i++)
+      parts.push(arr[i].name + (arr[i].count > 1 ? " ×" + arr[i].count : ""));
+    if(arr.length > n) parts.push("+" + (arr.length - n) + " more");
+    return parts.join(", ");
+  }
+  // sub_agent carries an agent type on some records and an opaque instance id
+  // on others. The ids are unusable to an operator, so they are counted rather
+  // than listed — the rollup already says the two cannot be paired.
+  function rvSubSummary(arr){
+    var named = [], anon = 0;
+    for(var i = 0; i < arr.length; i++){
+      if(/^[0-9a-f]{12,}$/i.test(arr[i].name)) anon += arr[i].count;
+      else named.push(arr[i]);
+    }
+    var s = named.length ? rvNames(named, 6) : "";
+    if(anon) s += (s ? ", plus " : "") + anon + " record" + (anon === 1 ? "" : "s") + " from unnamed subagents";
+    return s || "none named";
+  }
+  function rvPathList(list, q, cap){
+    var h = '<ul class="rulist">';
+    for(var i = 0; i < list.length && i < cap; i++)
+      h += '<li><code>'+esc(list[i].name)+'</code>'+(list[i].count > 1 ? ' ×'+esc(list[i].count) : '')+'</li>';
+    h += '</ul>';
+    if(list.length > cap)
+      h += '<div class="ruline"><button type="button" class="btn lnk" data-q="'+esc(q)+'">+ '+
+           esc(list.length - cap)+' more — show all these records</button></div>';
+    return h;
+  }
+
+  /* "ended" in the app's success colour reads as "finished its work"; all the
+     record establishes is that a root session.end exists. The state is named
+     after the record, and only the genuinely incomplete states take a colour. */
+  var LIFE = {
+    ended:      { t:"session.end recorded", c:"" },
+    open:       { t:"no end recorded",      c:"wa" },
+    "end-only": { t:"no start recorded",    c:"wa" },
+    unrecorded: { t:"no boundaries",        c:"" }
+  };
+
+  // What the pane is currently showing, so a live re-render can hold its place.
+  // Live polling re-parses every few seconds; without this, reading the caveats
+  // on a running session scrolls back to the top on every arrival.
+  var paneShowing = "";
+  // Every count in the rollup that can name its records carries the query that
+  // selects them, so "5 findings" is a step rather than a full stop. Selection
+  // is dropped so the pane keeps summarising rather than jumping to a record.
+  function wireDrill(){
+    var bs = detail.querySelectorAll("[data-q]");
+    for(var i = 0; i < bs.length; i++){
+      (function(b){
+        b.addEventListener("click", function(){
+          var q = b.getAttribute("data-q");
+          if(!q) return;
+          qEl.value = q; kindFilter = ""; range = null; tlclear.hidden = true;
+          sel = -1; paneMode = "auto";
+          syncStats(); listwrap.scrollTop = 0; apply();
+          if(!view.length) toast("No records match " + q, true);
+        });
+      })(bs[i]);
+    }
+  }
+
+  function showRollup(sid){
+    var keepScroll = (paneShowing === "rollup:" + sid) ? detail.scrollTop : 0;
+    paneShowing = "rollup:" + sid;
+    var r = sessionRollup(sid);
+    if(!r){
+      detail.innerHTML = '<div class="placeholder">Could not summarize this session.<br>'+
+        'Its records are still listed and selectable.</div>';
+      // base() strips a URL path; a session id is not a path.
+      toast("Could not summarize session " + sid, true);
+      return;
+    }
+    var life = LIFE[r.lifecycle.state] || LIFE.unrecorded;
+    var v = r.volume, h = "";
+
+    h += '<div class="dhead"><h2>session '+esc(r.id || "(unidentified)")+'</h2>';
+    // A zero span means every record shares one timestamp, which "over 0 ms"
+    // states confusingly — the span section below shows the instant itself.
+    h += '<p class="dsum">'+esc(r.records.toLocaleString())+' record'+(r.records===1?"":"s")+
+         (r.span.ms ? ' over '+esc(rvSpan(r.span.ms)) : '')+
+         ' · '+esc(life.t)+'</p><div class="dmeta">';
+    for(var a = 0; a < r.agents.length; a++) h += tag(r.agents[a].name, "");
+    for(var hh = 0; hh < r.hosts.length; hh++) h += tag(r.hosts[hh].name, "");
+    if(r.deviceId) h += tag("device " + r.deviceId, "");
+    if(r.model) h += tag(r.model, "");
+    h += tag(life.t, life.c);
+    h += '</div></div><div class="dbody">';
+
+    if(r.prompt){
+      h += '<span class="lbl">originating prompt</span><div class="cmd">'+esc(r.prompt)+'</div>';
+    } else {
+      h += '<span class="lbl">originating prompt</span><div class="ruline">No <b>prompt.user</b> record in this session.</div>';
+    }
+
+    if(r.span.from !== null){
+      // Every record sharing one timestamp is an instant, not a zero-length
+      // range: "10:46:05 → 10:46:05  0 ms" says the same thing three times.
+      h += '<span class="lbl">span</span><div class="ruline">'+
+           (r.span.ms ? esc(fmtLocal(r.span.from))+' → '+esc(fmtLocal(r.span.to))+
+                        '  <b>'+esc(rvSpan(r.span.ms))+'</b>'
+                      : esc(fmtLocal(r.span.from))+'  <b>a single instant</b>')+
+           (r.span.undated ? '<br>'+esc(r.span.undated.toLocaleString())+' record'+(r.span.undated===1?"":"s")+' with no usable timestamp, excluded' : '')+
+           '</div>';
+    }
+
+    // Findings lead. In a security tool they are the reason the pane exists,
+    // and burying them under volume counts puts them below the fold.
+    var base = "session:" + r.id;
+    h += '<span class="lbl">findings</span>';
+    if(!r.findings.total){
+      // The viewer reads a file; it never observed numbat evaluate anything.
+      // A finding can be absent because nothing matched, or because it never
+      // reached this file — the cited-event buttons elsewhere say as much.
+      h += '<div class="rufree"><b>No finding records.</b> This file contains no finding for this session. '+
+           'That is not the same as numbat having evaluated it: a finding can be absent because nothing matched a rule, '+
+           'or because it was never captured into this file.</div>';
+    } else {
+      h += '<div class="ruline"><button type="button" class="btn lnk" data-q="'+esc(base+" type:finding")+'"><b>'+
+           esc(r.findings.total.toLocaleString())+'</b> finding'+(r.findings.total===1?"":"s")+
+           ' · '+esc(rvNames(r.findings.bySeverity, 4))+' — show them</button></div>';
+      // Capped like the path lists: a session with thousands of distinct rule
+      // ids would otherwise render a pane of six-figure node counts on every
+      // live poll. The drill-down button reaches the rest.
+      var RCAP = 40;
+      h += '<ul class="rulist rufind">';
+      for(var f = 0; f < r.findings.rules.length && f < RCAP; f++){
+        var ru = r.findings.rules[f];
+        h += '<li><button type="button" class="btn lnk" data-q="'+esc(base+" rule:"+ru.name)+'">'+
+             '<span class="rt">'+esc(ru.title || ru.name)+'</span>'+
+             (ru.sev ? ' <span class="rs sv-'+cls(ru.sev)+'">'+esc(ru.sev)+'</span>' : '')+
+             (ru.count > 1 ? ' <span class="rc">×'+esc(ru.count)+'</span>' : '')+
+             '<span class="rid">'+esc(ru.name)+'</span>'+
+             (ru.target ? '<span class="rid">'+esc(ru.target)+'</span>' : '')+
+             '</button></li>';
+      }
+      h += '</ul>';
+      if(r.findings.rules.length > RCAP)
+        h += '<div class="ruline"><button type="button" class="btn lnk" data-q="'+esc(base+" type:finding")+'">+ '+
+             esc(r.findings.rules.length - RCAP)+' more rules — show all finding records</button></div>';
+    }
+
+    // command.exec is the pre-tool hook: it proves a command was proposed, not
+    // that it ran. The path counts are distinct paths, not events, and must not
+    // sit unlabelled beside raw event counts.
+    h += '<span class="lbl">what the records show</span><div class="rugrid">';
+    h += rvCell(v.execs, "commands proposed", "", base + " event:command.exec");
+    h += rvCell(v.results, "results observed", "", base + " event:command.result");
+    if(v.unpaired) h += rvCell(v.unpaired, "no result", "wa");
+    if(v.orphanResults) h += rvCell(v.orphanResults, "no command", "wa");
+    if(r.outcome.errored) h += rvCell(r.outcome.errored, "tagged tool_error", "hi", base + " tool_error");
+    if(r.outcome.withExitCode)
+      h += rvCell(r.outcome.nonZeroExit + " / " + r.outcome.withExitCode, "non-zero of exit codes", r.outcome.nonZeroExit ? "hi" : "");
+    h += rvCell(v.toolCalls, "tool calls", "", base + " event:tool.call");
+    h += rvCell(v.toolResults, "tool results", "", base + " event:tool.result");
+    h += rvCell(v.uniqueReads, "distinct files read", "", base + " event:file.read");
+    h += rvCell(v.uniqueWrites, "distinct files written", "", base + " event:file.write");
+    h += rvCell(v.prompts, "prompts", "", base + " event:prompt.user");
+    h += '</div>';
+
+    // Which files, not just how many: the written path is frequently the same
+    // thing a finding fired on, and leaving it as a count forces a JSON hunt.
+    if(r.files.written.length){
+      h += '<span class="lbl">files written · '+esc(r.files.written.length)+'</span>'+
+           rvPathList(r.files.written, base + " event:file.write", 12);
+    }
+    if(r.files.read.length){
+      h += '<span class="lbl">files read · '+esc(r.files.read.length)+'</span>'+
+           rvPathList(r.files.read, base + " event:file.read", 8);
+    }
+
+    if(r.enforcement.total){
+      h += '<span class="lbl">enforcement</span><div class="ruline"><b>'+
+           esc(r.enforcement.total.toLocaleString())+'</b> decision'+(r.enforcement.total===1?"":"s")+
+           ' · '+esc(rvNames(r.enforcement.decisions, 4))+'</div>';
+    }
+
+    if(r.subAgents.length){
+      h += '<span class="lbl">subagents</span><div class="ruline">'+
+           esc(r.subAgentRecords.toLocaleString())+' record'+(r.subAgentRecords===1?"":"s")+' from '+
+           esc(rvSubSummary(r.subAgents))+
+           '<br>'+esc(r.lifecycle.subStarts)+' start'+(r.lifecycle.subStarts===1?"":"s")+
+           ', '+esc(r.lifecycle.subEnds)+' end'+(r.lifecycle.subEnds===1?"":"s")+'</div>';
+    }
+
+    // Collapsed by default. The text is the most careful prose in the viewer,
+    // but as a wall of amber under every session it got skipped — which defeats
+    // the point of writing it. The count keeps it advertised.
+    if(r.notes.length){
+      h += '<details class="rucav"><summary>'+esc(r.notes.length)+
+           ' limit'+(r.notes.length===1?"":"s")+' of what these records establish</summary>'+
+           '<div class="note"><ul class="ipl">';
+      for(var n = 0; n < r.notes.length; n++) h += '<li>'+esc(r.notes[n])+'</li>';
+      h += '</ul></div></details>';
+    }
+
+    h += '<div class="dactions"><button type="button" class="btn" id="ruAll">← all sessions</button>'+
+         '<button type="button" class="btn" id="ruClear">Clear this filter</button></div></div>';
+
+    detail.innerHTML = h; detail.scrollTop = keepScroll;
+    wireDrill();
+    var ra = $("ruAll"); if(ra) ra.addEventListener("click", showSessionList);
+    var rc = $("ruClear");
+    if(rc) rc.addEventListener("click", function(){
+      qEl.value = ""; kindFilter = ""; range = null; tlclear.hidden = true;
+      syncStats(); listwrap.scrollTop = 0; apply();
+    });
+  }
+
+  /* ═════ session list ═════
+     Cheap once rollups exist, and it is what turns a log filter into a
+     management view. Sessions are enumerated from the records themselves, so a
+     session with no boundary events still appears. */
+  function allSessionIds(){
+    sessionIndex();
+    return sidOrder || [];
+  }
+
+  function showSessionList(){
+    var keepScroll = (paneShowing === "sessions") ? detail.scrollTop : 0;
+    paneShowing = "sessions";
+    paneMode = "sessions";
+    var ids = allSessionIds();
+    if(!ids.length){
+      detail.innerHTML = '<div class="placeholder">No records in this file carry a <b>session_id</b>.</div>';
+      return;
+    }
+    var rows = [];
+    for(var i = 0; i < ids.length; i++){
+      var r = sessionRollup(ids[i]);
+      if(r) rows.push(r);
+    }
+    // Most recent activity first, matching the list's default sort. Sessions
+    // with no usable timestamp sort last rather than claiming a position.
+    rows.sort(function(a, b){
+      var at = a.span.to, bt = b.span.to;
+      if(at === null && bt === null) return 0;
+      if(at === null) return 1;
+      if(bt === null) return -1;
+      return bt - at;
+    });
+
+    // Lead with the verdict, not the inventory.
+    var withFind = 0, totFind = 0;
+    for(var w = 0; w < rows.length; w++){ if(rows[w].findings.total){ withFind++; totFind += rows[w].findings.total; } }
+    var SCAP = 200;
+    var h = '<div class="dhead"><h2>sessions</h2><p class="dsum">'+
+            esc(rows.length)+' session'+(rows.length===1?"":"s")+' · '+
+            (totFind ? esc(withFind)+' with findings ('+esc(totFind)+' total)' : 'none with findings')+
+            '</p></div><div class="dbody">';
+    if(rows.length > SCAP)
+      h += '<div class="ruline">Showing the '+esc(SCAP)+' most recent of '+esc(rows.length)+'.</div>';
+    for(var k = 0; k < rows.length && k < SCAP; k++){
+      var r2 = rows[k], v = r2.volume;
+      var life = LIFE[r2.lifecycle.state] || LIFE.unrecorded;
+      var bits = [];
+      bits.push('<em>'+esc(r2.agents.length ? r2.agents[0].name : "unknown agent")+'</em>');
+      bits.push('<em>'+esc(r2.span.to !== null ? fmtLocal(r2.span.to) : "no timestamp")+'</em>');
+      if(r2.span.ms) bits.push('<em>'+esc(rvSpan(r2.span.ms))+'</em>');
+      bits.push('<em>'+esc(v.execs.toLocaleString())+' proposed</em>');
+      // Both chips always render. Marking only bad news makes a silent row read
+      // as "fine", which is the inference this viewer exists to refuse.
+      bits.push(r2.findings.total
+        ? '<em class="fi">'+esc(r2.findings.total)+' finding'+(r2.findings.total===1?"":"s")+'</em>'
+        : '<em>0 findings</em>');
+      bits.push('<em'+(r2.lifecycle.state !== "ended" ? ' class="op"' : '')+'>'+esc(life.t)+'</em>');
+
+      h += '<button type="button" class="btn sesslist'+(r2.findings.total?" hasfind":"")+'" data-sid="'+esc(r2.id)+'">'+
+           '<span class="s1"><span>'+esc(r2.id)+'</span>'+bits.join("")+'</span>'+
+           '<span class="s2">'+esc(r2.prompt || "no prompt recorded")+'</span></button>';
+    }
+    h += '</div>';
+    detail.innerHTML = h; detail.scrollTop = keepScroll;
+
+    var bs = detail.querySelectorAll(".sesslist");
+    for(var b = 0; b < bs.length; b++){
+      (function(btn){
+        btn.addEventListener("click", function(){
+          var sid = btn.getAttribute("data-sid");
+          // The query language splits on whitespace and reads a leading "-" as
+          // negation, so an id containing either cannot be expressed as a
+          // filter. Say so rather than silently filtering to nothing.
+          if(!sid){ toast("This session has no usable id to filter on", true); return; }
+          if(/\s/.test(sid) || sid.charAt(0) === "-"){
+            toast("This session id cannot be expressed as a filter — it contains whitespace or a leading dash", true);
+            return;
+          }
+          paneMode = "auto"; sel = -1;
+          qEl.value = "session:" + sid; kindFilter = ""; range = null;
+          tlclear.hidden = true; syncStats(); listwrap.scrollTop = 0;
+          apply();
+        });
+      })(bs[b]);
+    }
+  }
+
+  function showPlaceholder(){
+    var h = '<div class="placeholder">Select a record to inspect it.<br><br>'+
+      '<b>Findings</b> resolve cited events into jump buttons.<br>'+
+      '<b>Events</b> show the full command or tool payload.<br>'+
+      'Narrow to one <b>session</b> and this pane summarizes it.<br><br>'+
+      'Query fields: <b>rule:</b> <b>sev:</b> <b>agent:</b> <b>type:</b> <b>session:</b> <b>event:</b> <b>id:</b><br>'+
+      'Prefix with <b>-</b> to negate. Anything else is free text.</div>'+
+      '<div class="dbody" style="padding-top:0"><button type="button" class="btn" id="phSess">⧉ Browse sessions</button></div>';
+    paneShowing = "placeholder";
+    detail.innerHTML = h;
+    var b = $("phSess");
+    if(b) b.addEventListener("click", showSessionList);
+  }
+
+  // Decides what the pane shows after any filter change. A selected record
+  // always wins; otherwise a view narrowed to one session summarises it.
+  function refreshPane(){
+    if(paneMode === "sessions"){ showSessionList(); return; }
+    if(sel >= 0 && recs[sel]) return;
+    var sid = loneSession();
+    if(sid) showRollup(sid); else showPlaceholder();
+  }
+
   function showDetail(r){
     if(!r) return;
     var o=r.o,h="";
@@ -1246,9 +2043,10 @@
       for(var g=0;g<o.tags.length;g++) h+=tag(s(o.tags[g]),"");
       h+='</div>';
     }
-    if(r.sid) h+='<span class="lbl">session</span><button type="button" class="btn jump" id="sessBtn">⧉ isolate '+esc(r.sid)+'</button>';
+    if(r.sid) h+='<span class="lbl">session</span><button type="button" class="btn jump" id="sessBtn" title="Filter to this session and summarize it">⧉ isolate &amp; summarize '+esc(r.sid)+'</button>';
     h+='<span class="lbl">full record</span><pre class="json">'+hilite(o)+'</pre>';
     h+='<div class="dactions"><button type="button" class="btn" id="cpJson">Copy JSON</button><button type="button" class="btn" id="cpLine">Copy raw line</button></div></div>';
+    paneShowing="record:"+r.i;
     detail.innerHTML=h; detail.scrollTop=0;
     var jumps=detail.querySelectorAll(".jump[data-t]");
     for(var j=0;j<jumps.length;j++){
@@ -1258,12 +2056,18 @@
       }); })(jumps[j]);
     }
     var sb=$("sessBtn");
-    if(sb) sb.addEventListener("click",function(){ qEl.value="session:"+r.sid; kindFilter=""; syncStats(); listwrap.scrollTop=0; apply(); });
+    // Isolating a session also summarises it: dropping the selection lets
+    // refreshPane() hand the pane to the rollup instead of this record.
+    if(sb) sb.addEventListener("click",function(){
+      qEl.value="session:"+r.sid; kindFilter=""; range=null; tlclear.hidden=true;
+      sel=-1; paneMode="auto";
+      syncStats(); listwrap.scrollTop=0; apply();
+    });
     var cj=$("cpJson"),cl=$("cpLine");
     if(cj) cj.addEventListener("click",function(){ copy(safeStr(o),"JSON copied"); });
     if(cl) cl.addEventListener("click",function(){ copy(r.raw,"Raw line copied"); });
   }
-  function tag(t,c){ return '<span class="tag '+c+'">'+esc(t)+'</span>'; }
+  function tag(t,c){ return '<span class="tag '+cls(c)+'">'+esc(t)+'</span>'; }
   function safeStr(o){ try{ return JSON.stringify(o,null,2); }catch(e){ return "[unserializable record]"; } }
   function hilite(o){
     var raw=safeStr(o);
@@ -1494,6 +2298,15 @@
     return String(v===undefined||v===null?"":v)
       .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
       .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+  }
+  /* esc() makes a value safe inside an attribute; it does not make it safe as a
+     class *token list*, because it leaves spaces alone. A record-derived
+     severity of "critical sv-low" would otherwise inject a second class token
+     and — since the later rule wins at equal specificity — let a hostile
+     finding paint itself in the low-severity colour an operator scans past.
+     Anything reaching a class attribute goes through here. */
+  function cls(v){
+    return String(v===undefined||v===null?"":v).replace(/[^A-Za-z0-9_-]/g,"-").slice(0,40);
   }
   function trunc(v,n){
     var str=String(v===undefined||v===null?"":v).replace(/\s+/g," ");
