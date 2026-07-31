@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""numbat-prune — trim numbat NDJSON record files to a retention window.
+
+  numbat-prune                  prune ~/.numbat/*.ndjson to 30 days
+  numbat-prune -d 14            14-day window
+  numbat-prune -n               dry run: report only, change nothing
+  numbat-prune -f FILE          prune one specific file
+  numbat-prune --no-archive     discard pruned records instead of archiving
+  numbat-prune --archive-days N also prune archives older than N days
+
+Safety guarantees:
+  * Records with no parseable timestamp are ALWAYS KEPT.
+  * Malformed lines are ALWAYS KEPT (never silently destroyed).
+  * Pruned records are gzip-archived by default before removal.
+  * The replace is atomic (same-directory temp + os.replace).
+  * File permissions are preserved.
+  * Nothing is written unless the rewrite fully succeeds.
+"""
+
+import argparse
+import datetime as dt
+import glob
+import gzip
+import json
+import os
+import shutil
+import stat
+import sys
+import tempfile
+
+TS_FIELDS = ("timestamp", "detected_at", "last_seen")
+
+
+def human(n):
+    n = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if abs(n) < 1024.0:
+            return ("%d %s" % (n, unit)) if unit == "B" else ("%.1f %s" % (n, unit))
+        n /= 1024.0
+    return "%.2f TB" % n
+
+
+def parse_ts(value):
+    """Return an aware UTC datetime, or None if unparseable."""
+    if not isinstance(value, str) or not value:
+        return None
+    v = value.strip()
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        d = dt.datetime.fromisoformat(v)
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=dt.timezone.utc)
+    return d.astimezone(dt.timezone.utc)
+
+
+def record_time(obj):
+    for f in TS_FIELDS:
+        if f in obj:
+            t = parse_ts(obj.get(f))
+            if t is not None:
+                return t
+    return None
+
+
+def classify(path, cutoff):
+    """Split a file into (keep_lines, drop_lines, stats) without mutating it."""
+    keep, drop = [], []
+    malformed = untimed = 0
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                malformed += 1
+                keep.append(line)          # never destroy what we cannot read
+                continue
+            if not isinstance(obj, dict):
+                malformed += 1
+                keep.append(line)
+                continue
+            t = record_time(obj)
+            if t is None:
+                untimed += 1
+                keep.append(line)          # no timestamp -> always retained
+            elif t >= cutoff:
+                keep.append(line)
+            else:
+                drop.append(line)
+    return keep, drop, {"malformed": malformed, "untimed": untimed}
+
+
+def prune_file(path, cutoff, dry, archive, archive_dir):
+    name = os.path.basename(path)
+    try:
+        before_bytes = os.path.getsize(path)
+    except OSError as e:
+        print("  %-30s SKIPPED — %s" % (name, e))
+        return 0
+
+    try:
+        keep, drop, st = classify(path, cutoff)
+    except OSError as e:
+        print("  %-30s SKIPPED — %s" % (name, e))
+        return 0
+
+    total = len(keep) + len(drop)
+    notes = []
+    if st["untimed"]:
+        notes.append("%d untimed kept" % st["untimed"])
+    if st["malformed"]:
+        notes.append("%d malformed kept" % st["malformed"])
+    note = ("  [" + ", ".join(notes) + "]") if notes else ""
+
+    if not drop:
+        print("  %-30s %6d records · nothing past cutoff%s" % (name, total, note))
+        return 0
+
+    kept_bytes = sum(len(l.encode("utf-8")) for l in keep)
+    freed = before_bytes - kept_bytes
+    print("  %-30s %6d → %-6d  dropping %d  (frees %s)%s"
+          % (name, total, len(keep), len(drop), human(freed), note))
+
+    if dry:
+        return 0
+
+    # 1. Archive first. If archiving fails, abort before touching the original.
+    if archive:
+        try:
+            os.makedirs(archive_dir, exist_ok=True)
+            stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+            arc = os.path.join(archive_dir,
+                               "%s-pruned-%s.ndjson.gz" % (name[:-7] if name.endswith(".ndjson") else name, stamp))
+            with gzip.open(arc, "wt", encoding="utf-8") as gz:
+                for line in drop:
+                    gz.write(line if line.endswith("\n") else line + "\n")
+            os.chmod(arc, stat.S_IRUSR | stat.S_IWUSR)
+            print("  %-30s archived %d records → %s" % ("", len(drop), os.path.basename(arc)))
+        except Exception as e:
+            print("  %-30s ABORTED — archive failed: %s" % (name, e))
+            return 0
+
+    # 2. Write the survivors to a temp file in the same directory, then swap.
+    d = os.path.dirname(os.path.abspath(path)) or "."
+    tmp_path = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix=name + ".prune.", dir=d)
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            for line in keep:
+                out.write(line if line.endswith("\n") else line + "\n")
+            out.flush()
+            os.fsync(out.fileno())
+        try:
+            shutil.copymode(path, tmp_path)
+        except OSError:
+            os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
+        os.replace(tmp_path, path)          # atomic within one filesystem
+        tmp_path = None
+    except Exception as e:
+        print("  %-30s FAILED — %s (original untouched)" % (name, e))
+        return 0
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+    return freed
+
+
+def prune_archives(archive_dir, days):
+    if not os.path.isdir(archive_dir):
+        return 0
+    cutoff = dt.datetime.now().timestamp() - days * 86400
+    freed = 0
+    for p in sorted(glob.glob(os.path.join(archive_dir, "*.gz"))):
+        try:
+            if os.path.getmtime(p) < cutoff:
+                sz = os.path.getsize(p)
+                os.unlink(p)
+                freed += sz
+                print("  removed archive %s (%s)" % (os.path.basename(p), human(sz)))
+        except OSError:
+            pass
+    return freed
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=True,
+                                 description="Trim numbat NDJSON record files to a retention window.")
+    ap.add_argument("-d", "--days", type=int, default=30, help="retention window in days (default 30)")
+    ap.add_argument("-f", "--file", help="prune a single file instead of the whole directory")
+    ap.add_argument("-n", "--dry-run", action="store_true", help="report only; change nothing")
+    ap.add_argument("--no-archive", action="store_true", help="discard pruned records instead of archiving")
+    ap.add_argument("--archive-days", type=int, default=0,
+                    help="also delete gzip archives older than N days (0 = keep all)")
+    ap.add_argument("--dir", default=os.environ.get("NUMBAT_DIR", os.path.expanduser("~/.numbat")),
+                    help="numbat directory (default ~/.numbat)")
+    a = ap.parse_args()
+
+    if a.days <= 0:
+        sys.exit("numbat-prune: --days must be greater than zero")
+
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=a.days)
+    archive_dir = os.path.join(a.dir, "archive")
+
+    if a.file:
+        if not os.path.isfile(a.file):
+            sys.exit("numbat-prune: no such file: %s" % a.file)
+        files = [a.file]
+    else:
+        if not os.path.isdir(a.dir):
+            sys.exit("numbat-prune: no such directory: %s" % a.dir)
+        files = sorted(glob.glob(os.path.join(a.dir, "*.ndjson")))
+        if not files:
+            sys.exit("numbat-prune: no .ndjson files in %s" % a.dir)
+
+    print("cutoff    %s   (%d day window)" % (cutoff.strftime("%Y-%m-%d %H:%M:%SZ"), a.days))
+    print("target    %s" % (a.file or a.dir))
+    if a.dry_run:
+        print("mode      DRY RUN — nothing will be written")
+    print("")
+
+    freed = 0
+    for path in files:
+        freed += prune_file(path, cutoff, a.dry_run, not a.no_archive, archive_dir)
+
+    if a.archive_days > 0 and not a.dry_run:
+        print("")
+        freed += prune_archives(archive_dir, a.archive_days)
+
+    print("")
+    if a.dry_run:
+        print("dry run complete — rerun without -n to apply")
+    else:
+        print("freed %s" % human(freed))
+        if not a.no_archive:
+            print("archives kept in %s" % archive_dir)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(130)

@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>numbat-tools — architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Martian+Mono:wght@300;500&family=Public+Sans:ital,wght@0,300;0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bark:#191512; --soil:#221C18; --ridge:#2E2620;
+    --band:#EDE6DA; --dust:#8C7F72;
+    --rufous:#C1532B; --verdigris:#52A88E; --amberline:#D8A24A;
+    --display:"Bricolage Grotesque","Helvetica Neue",sans-serif;
+    --body:"Public Sans",system-ui,sans-serif;
+    --mono:"Martian Mono",ui-monospace,"SF Mono",monospace;
+    --gut:clamp(20px,4vw,64px);
+    --rule:1px solid rgba(237,230,218,.12);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bark);color:var(--band);
+    font-family:var(--body);font-weight:300;font-size:16.5px;line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.35;
+    background:repeating-linear-gradient(180deg,rgba(237,230,218,.035) 0 1px,transparent 1px 5px);
+  }
+  .wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:0 var(--gut)}
+  h1,h2,h3{font-family:var(--display);font-weight:800;letter-spacing:-.025em;line-height:1.02;margin:0}
+  p{margin:0 0 1.05em}
+  code{font-family:var(--mono);font-size:.88em;color:var(--amberline)}
+
+  .eyebrow{
+    font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--dust);display:flex;align-items:center;gap:12px;margin-bottom:22px;
+  }
+  .eyebrow::after{content:"";flex:1;height:1px;background:rgba(237,230,218,.14)}
+
+  .masthead{border-bottom:var(--rule);padding:22px 0}
+  .masthead .wrap{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  .glyph{display:flex;align-items:center;gap:13px;font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase}
+  .pelt{display:flex;gap:2.5px;align-items:flex-end;height:19px}
+  .pelt i{width:3px;background:var(--rufous);border-radius:1px;animation:pelt 2.6s ease-in-out infinite}
+  .pelt i:nth-child(1){height:8px}
+  .pelt i:nth-child(2){height:13px;animation-delay:.13s}
+  .pelt i:nth-child(3){height:19px;animation-delay:.26s;background:var(--band)}
+  .pelt i:nth-child(4){height:13px;animation-delay:.39s}
+  .pelt i:nth-child(5){height:16px;animation-delay:.52s;background:var(--band)}
+  .pelt i:nth-child(6){height:9px;animation-delay:.65s}
+  @keyframes pelt{0%,100%{transform:scaleY(1);opacity:.85}50%{transform:scaleY(.45);opacity:1}}
+  .masthead nav{display:flex;gap:26px;font-family:var(--mono);font-size:11px;letter-spacing:.09em}
+  .masthead nav a{color:var(--dust);text-decoration:none;transition:color .2s}
+  .masthead nav a:hover{color:var(--band)}
+
+  .hero{padding:clamp(56px,9vw,104px) 0 clamp(30px,5vw,56px)}
+  .hero h1{font-size:clamp(38px,7vw,80px);max-width:15ch}
+  .hero h1 em{font-style:normal;color:var(--rufous)}
+  .lede{font-size:clamp(17px,1.9vw,21px);max-width:58ch;color:rgba(237,230,218,.82);margin-top:26px}
+
+  section{padding:clamp(50px,7vw,96px) 0;border-top:var(--rule)}
+  .sec-title{font-size:clamp(26px,3.8vw,42px);max-width:22ch;margin-bottom:24px}
+  .sec-lede{max-width:64ch;color:rgba(237,230,218,.78)}
+
+  .stage{margin-top:40px;border:var(--rule);background:var(--soil);border-radius:3px;padding:clamp(18px,3vw,32px)}
+  .stage svg{width:100%;height:auto;display:block}
+  .flow{stroke-dasharray:5 7;animation:flow 1.4s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-24}}
+  .nodebox{fill:var(--ridge);stroke:rgba(237,230,218,.2)}
+  .nodetxt{fill:var(--band);font-family:"Martian Mono",monospace;font-size:10px;letter-spacing:.05em}
+  .nodesub{fill:var(--dust);font-family:"Public Sans",sans-serif;font-size:10.5px}
+  .stagelbl{fill:var(--dust);font-family:"Martian Mono",monospace;font-size:9px;letter-spacing:.18em}
+
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(262px,1fr));gap:20px;margin-top:40px}
+  .card{border:var(--rule);background:var(--soil);border-radius:3px;padding:24px 22px}
+  .card h3{font-size:19px;margin-bottom:11px}
+  .card p{font-size:14.5px;color:rgba(237,230,218,.76);margin-bottom:0}
+  .card .tick{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dust);display:block;margin-bottom:13px}
+
+  /* request gate */
+  .gates{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-top:38px}
+  .gate{border:var(--rule);background:var(--soil);border-radius:3px;overflow:hidden}
+  .gate-h{padding:12px 16px;border-bottom:var(--rule);font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dust)}
+  .lane{position:relative;height:104px;background:var(--bark);overflow:hidden}
+  .wall{position:absolute;top:0;bottom:0;left:62%;width:3px;background:var(--dust);opacity:.3}
+  .gate.deny .wall{background:var(--rufous);opacity:1;box-shadow:0 0 16px rgba(193,83,43,.45)}
+  .gate.allow .wall{background:var(--verdigris);opacity:.55}
+  .pkt{
+    position:absolute;top:50%;transform:translateY(-50%);
+    font-family:var(--mono);font-size:9.5px;padding:5px 9px;border-radius:2px;
+    border:1px solid rgba(237,230,218,.25);background:var(--ridge);white-space:nowrap;
+  }
+  .gate.allow .pkt{animation:pass 4.4s ease-in-out infinite;border-color:var(--verdigris);color:var(--verdigris)}
+  .gate.deny .pkt{animation:block 4.4s ease-in-out infinite;border-color:var(--rufous);color:var(--rufous)}
+  @keyframes pass{0%{left:4%;opacity:0}10%{opacity:1}85%{opacity:1}100%{left:84%;opacity:0}}
+  @keyframes block{
+    0%{left:4%;opacity:0}18%{left:30%;opacity:1}
+    44%{left:44%}50%{left:38%}56%{left:44%}
+    100%{left:44%;opacity:1}
+  }
+  .verdict{padding:12px 16px;border-top:var(--rule);font-family:var(--mono);font-size:10.5px}
+  .gate.allow .verdict{color:var(--verdigris)}
+  .gate.deny .verdict{color:var(--rufous)}
+  .gate-note{padding:0 16px 16px;font-size:13.5px;color:rgba(237,230,218,.72);line-height:1.55}
+
+  /* pipeline steps */
+  .steps{margin-top:38px}
+  .step{
+    display:grid;grid-template-columns:52px minmax(0,1fr);gap:clamp(14px,2.5vw,28px);
+    padding:26px 0;border-top:1px dashed rgba(237,230,218,.11);
+    opacity:0;transform:translateY(16px);transition:opacity .65s ease,transform .65s ease;
+  }
+  .step.seen{opacity:1;transform:none}
+  .step-n{font-family:var(--mono);font-size:11px;color:var(--rufous);padding-top:4px}
+  .step h3{font-size:19px;margin-bottom:9px}
+  .step p{font-size:14.5px;color:rgba(237,230,218,.76);max-width:62ch;margin-bottom:0}
+
+  .callout{
+    border-left:2px solid var(--rufous);background:rgba(193,83,43,.07);
+    padding:18px 22px;border-radius:0 3px 3px 0;margin-top:32px;
+  }
+  .callout p{font-size:14.5px;margin-bottom:0;color:rgba(237,230,218,.85)}
+  .callout strong{color:var(--band);font-weight:600}
+
+  .swap{margin-top:38px;border:var(--rule);background:var(--soil);border-radius:3px;padding:clamp(18px,3vw,30px)}
+  .swap-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+  .chip{
+    font-family:var(--mono);font-size:10.5px;padding:7px 12px;border-radius:2px;
+    border:1px solid rgba(237,230,218,.2);background:var(--ridge);white-space:nowrap;
+  }
+  .chip.ok{border-color:var(--verdigris);color:var(--verdigris)}
+  .chip.warn{border-color:var(--amberline);color:var(--amberline)}
+  .chip.stop{border-color:var(--rufous);color:var(--rufous)}
+  .arrow{color:var(--dust);font-family:var(--mono);font-size:13px}
+
+  .limits{margin-top:34px;border-top:var(--rule)}
+  .limit{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:24px;padding:20px 0;border-bottom:1px dashed rgba(237,230,218,.1)}
+  .limit h3{font-size:15.5px;font-family:var(--body);font-weight:600;letter-spacing:0}
+  .limit p{font-size:14px;color:rgba(237,230,218,.72);margin:0}
+
+  footer{padding:48px 0 64px;border-top:var(--rule);font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;color:var(--dust);display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+
+  @media (max-width:820px){
+    .limit{grid-template-columns:1fr}
+    .masthead nav{display:none}
+    .step{grid-template-columns:1fr}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+    .step{opacity:1;transform:none}
+    html{scroll-behavior:auto}
+  }
+</style>
+</head>
+<body>
+
+<div class="masthead">
+  <div class="wrap">
+    <div class="glyph">
+      <span class="pelt"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      numbat-tools <span style="color:var(--dust)">architecture</span>
+    </div>
+    <nav>
+      <a href="#flow">Flow</a>
+      <a href="#gate">Gate</a>
+      <a href="#viewer">Viewer</a>
+      <a href="#prune">Prune</a>
+      <a href="#limits">Limits</a>
+    </nav>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="hero">
+    <div class="eyebrow">Three components · one loopback boundary</div>
+    <h1>numbat writes the records. This is <em>where you read them</em>.</h1>
+    <p class="lede">A Go daemon serves one HTML file and a whitelist of NDJSON over 127.0.0.1. The page parses in chunks, renders a virtual window, and never sends a byte anywhere. A Python tool trims the log on a schedule without ever losing a record. That's the whole system.</p>
+  </div>
+</div>
+
+<!-- ═══════ FLOW ═══════ -->
+<section id="flow">
+  <div class="wrap">
+    <div class="eyebrow">Request path</div>
+    <h2 class="sec-title">Browser to daemon to disk. Nothing leaves the machine.</h2>
+    <p class="sec-lede">The viewer never touches the filesystem directly — browsers forbid it. numbatd is the shim: it answers three routes, and everything it will serve is decided by a regex before a file handle is ever opened.</p>
+
+    <div class="stage">
+      <svg viewBox="0 0 1000 300" role="img" aria-label="Request flow from browser through numbatd to the numbat data directory">
+        <text class="stagelbl" x="20" y="20">BROWSER</text>
+        <text class="stagelbl" x="360" y="20">NUMBATD · 127.0.0.1:8787</text>
+        <text class="stagelbl" x="808" y="20">DISK</text>
+
+        <rect class="nodebox" x="20" y="112" width="210" height="72" rx="3"/>
+        <text class="nodetxt" x="36" y="140">viewer.html</text>
+        <text class="nodesub" x="36" y="160">fetch() · no filesystem</text>
+        <text class="nodesub" x="36" y="175">access of its own</text>
+
+        <path class="flow" d="M230 148 H360" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
+
+        <rect class="nodebox" x="360" y="40" width="200" height="54" rx="3"/>
+        <text class="nodetxt" x="376" y="63">GET /</text>
+        <text class="nodesub" x="376" y="81">serves the viewer</text>
+
+        <rect class="nodebox" x="360" y="118" width="200" height="54" rx="3"/>
+        <text class="nodetxt" x="376" y="141">GET /api/sources</text>
+        <text class="nodesub" x="376" y="159">JSON list, largest first</text>
+
+        <rect class="nodebox" x="360" y="196" width="200" height="54" rx="3"/>
+        <text class="nodetxt" x="376" y="219">GET /files/{name}</text>
+        <text class="nodesub" x="376" y="237">HEAD supported</text>
+
+        <path d="M330 148 V67 H360" stroke="rgba(237,230,218,.2)" stroke-width="1" fill="none"/>
+        <path d="M330 148 V223 H360" stroke="rgba(237,230,218,.2)" stroke-width="1" fill="none"/>
+
+        <rect class="nodebox" x="600" y="112" width="170" height="72" rx="3" stroke="var(--amberline)"/>
+        <text class="nodetxt" x="616" y="140" style="fill:var(--amberline)">whitelist</text>
+        <text class="nodesub" x="616" y="159">*.ndjson only</text>
+        <text class="nodesub" x="616" y="174">symlinks resolved</text>
+
+        <path class="flow" d="M560 148 H600" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
+        <path class="flow" d="M770 148 H820" stroke="var(--rufous)" stroke-width="1.5" fill="none"/>
+
+        <rect class="nodebox" x="820" y="112" width="160" height="72" rx="3"/>
+        <text class="nodetxt" x="836" y="140">~/.numbat</text>
+        <text class="nodesub" x="836" y="160">records.ndjson</text>
+        <text class="nodesub" x="836" y="175">written by hooks</text>
+      </svg>
+    </div>
+
+    <div class="grid3">
+      <div class="card">
+        <span class="tick">Auto-load</span>
+        <h3>No file picker</h3>
+        <p>On open the page calls <code>/api/sources</code>, gets every record file with its size, and loads the largest automatically. Falls back to scraping a directory index, then to a manual picker — so the same HTML works behind any server, or none.</p>
+      </div>
+      <div class="card">
+        <span class="tick">Live</span>
+        <h3>HEAD before GET</h3>
+        <p>Polling compares <code>content-length</code>, <code>last-modified</code>, and <code>etag</code> every four seconds and only re-downloads when one changes. Filters, time range, and the selected record survive each refresh.</p>
+      </div>
+      <div class="card">
+        <span class="tick">Footprint</span>
+        <h3>One small process</h3>
+        <p>Static Go binary, no cgo, standard library only. Idles around 6 MB resident. launchd starts it at login and restarts it if it dies, throttled so a crash loop can't spin.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ GATE ═══════ -->
+<section id="gate">
+  <div class="wrap">
+    <div class="eyebrow">The security boundary</div>
+    <h2 class="sec-title">A localhost port is reachable from every tab you have open.</h2>
+    <p class="sec-lede">That's the actual threat model — not the network, but the browser. A page on any site can send requests to 127.0.0.1. Two mechanisms decide what happens next, and neither is authentication.</p>
+
+    <div class="gates">
+      <div class="gate allow">
+        <div class="gate-h">Host: 127.0.0.1:8787</div>
+        <div class="lane"><div class="wall"></div><div class="pkt">GET /files/records.ndjson</div></div>
+        <div class="verdict">200 · served</div>
+        <p class="gate-note">A request from the viewer itself carries a loopback Host header. It passes, and the filename is checked against the whitelist before any file is opened.</p>
+      </div>
+      <div class="gate deny">
+        <div class="gate-h">Host: attacker.example</div>
+        <div class="lane"><div class="wall"></div><div class="pkt">GET /files/records.ndjson</div></div>
+        <div class="verdict">403 · rejected</div>
+        <p class="gate-note">DNS rebinding points a hostile domain at 127.0.0.1 so a remote page can talk to local services. The Host header still says the attacker's domain. That's the tell, and it's checked first.</p>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p><strong>No CORS headers are ever set.</strong> A malicious page can still <em>send</em> a request to a localhost port — that's how the web works and no server can prevent it. But without <code>Access-Control-Allow-Origin</code> the browser refuses to hand the response back to the script that asked. Silence is the defense.</p>
+    </div>
+
+    <div class="grid3">
+      <div class="card">
+        <span class="tick">Bind</span>
+        <h3>Loopback or nothing</h3>
+        <p>The daemon parses its own listen address at startup and exits if it isn't 127.0.0.1. You cannot misconfigure it onto a network interface, even deliberately, without editing the source.</p>
+      </div>
+      <div class="card">
+        <span class="tick">Path</span>
+        <h3>Whitelist, not blacklist</h3>
+        <p>Filenames must match <code>[A-Za-z0-9._-]*.ndjson</code>, then the resolved real path must still sit inside the data directory. Traversal and planted symlinks both fail closed. No directory listing exists.</p>
+      </div>
+      <div class="card">
+        <span class="tick">Auth</span>
+        <h3>Deliberately absent</h3>
+        <p>Any process running as you can already read <code>~/.numbat</code> straight off disk. A token would add ceremony without adding a boundary. The boundaries that exist — other users, other machines, hostile pages — are covered above.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ VIEWER ═══════ -->
+<section id="viewer">
+  <div class="wrap">
+    <div class="eyebrow">Inside the page</div>
+    <h2 class="sec-title">Parse in chunks, render a window, index once.</h2>
+    <p class="sec-lede">A record stream grows without bound. Three decisions keep the page responsive whether the file holds a thousand lines or a million.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-n">01</div>
+        <div>
+          <h3>Chunked parse</h3>
+          <p>12,000 lines per animation frame with a progress bar, so the tab never locks while <code>JSON.parse</code> grinds. A load token invalidates any in-flight parse if a newer file arrives, and records are built into a local array that only replaces the live one on success — a failed load leaves the previous view intact.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-n">02</div>
+        <div>
+          <h3>Flatten once, filter on primitives</h3>
+          <p>At parse time each record is reduced to a flat shape — type, severity, rule, agent, session, timestamp as epoch ms — plus a cached lowercase copy of the raw line. Filtering is then a linear scan over strings and numbers rather than repeated object traversal, which is what makes the query box feel instant.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-n">03</div>
+        <div>
+          <h3>Virtual window</h3>
+          <p>The list is a sized spacer with roughly sixty rows transform-positioned over it. Scrolling recomputes the slice on an animation frame. DOM cost is constant: scrolling two hundred thousand records costs exactly what scrolling two hundred costs.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-n">04</div>
+        <div>
+          <h3>Lazy event index</h3>
+          <p>Findings reference their evidence by <code>cited_event_ids</code>. The id-to-index map is built on first use, not at load, so files with no findings never pay for it. That map is what turns a sequence match into two clicks from the commands behind it.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p><strong>Every value reaching the DOM is HTML-escaped, including inside the search highlighter.</strong> The content being rendered is agent-generated command text — untrusted input you didn't write. A record containing an image tag with an error handler is a perfectly plausible thing for an agent to have executed, and it renders as literal text.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ PRUNE ═══════ -->
+<section id="prune">
+  <div class="wrap">
+    <div class="eyebrow">Retention</div>
+    <h2 class="sec-title">numbat never rotates its own output. Something has to.</h2>
+    <p class="sec-lede">The order of operations is the entire design. Archive first, swap atomically, and treat anything you cannot confidently date as something to keep.</p>
+
+    <div class="swap">
+      <div class="swap-row">
+        <span class="chip">classify in memory</span><span class="arrow">→</span>
+        <span class="chip warn">gzip the drop set</span><span class="arrow">→</span>
+        <span class="chip">write temp, same dir</span><span class="arrow">→</span>
+        <span class="chip">fsync</span><span class="arrow">→</span>
+        <span class="chip ok">os.replace</span>
+      </div>
+      <div class="swap-row">
+        <span class="chip stop">archive fails → original untouched, exit</span>
+        <span class="chip stop">temp write fails → original untouched, exit</span>
+      </div>
+      <p style="margin:14px 0 0;font-size:14px;color:rgba(237,230,218,.72);max-width:64ch">
+        <code>os.replace</code> is atomic within a filesystem, so a crash mid-operation leaves either the old file or the new one — never a truncated log. Permissions carry across. A second run is a no-op.
+      </p>
+    </div>
+
+    <div class="grid3">
+      <div class="card">
+        <span class="tick">Kept always</span>
+        <h3>Anything undateable</h3>
+        <p>Records with no timestamp field, records whose timestamp won't parse, and malformed lines that aren't valid JSON are all retained verbatim. A retention tool that silently destroys what it can't read is worse than no retention tool.</p>
+      </div>
+      <div class="card">
+        <span class="tick">Archived</span>
+        <h3>Dropped, not deleted</h3>
+        <p>Removed records are gzipped into <code>archive/</code> with a timestamped name before the original is rewritten. Archives themselves age out on a separate, longer window.</p>
+      </div>
+      <div class="card">
+        <span class="tick">Verified</span>
+        <h3>Counted end to end</h3>
+        <p>Kept plus archived always equals the original record count. That invariant is asserted against a fixture seeded with malformed lines, undated records, and garbage timestamps.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ LIMITS ═══════ -->
+<section id="limits">
+  <div class="wrap">
+    <div class="eyebrow">Known edges</div>
+    <h2 class="sec-title">What this doesn't do.</h2>
+
+    <div class="limits">
+      <div class="limit">
+        <h3>Whole file in memory</h3>
+        <p>The viewer loads the entire stream before rendering. A guard rejects files past 900 MB with a message rather than hanging the tab. Prune regularly and this never comes up.</p>
+      </div>
+      <div class="limit">
+        <h3>Prune races live hooks</h3>
+        <p>Hook processes append while prune rewrites. They're short-lived so the window is small, but a hook firing during the swap writes to the old inode. The scheduled run defaults to Monday morning for that reason.</p>
+      </div>
+      <div class="limit">
+        <h3>Records are sensitive</h3>
+        <p>Agent commands, prompts, project paths, hostname, and username sit in plaintext on disk. numbat redacts values before emission, but what remains is still a detailed account of what ran on your machine.</p>
+      </div>
+      <div class="limit">
+        <h3>Schema will move</h3>
+        <p>Built against numbat v0.1.1, record schema 0.2.0 — a format days old at time of writing. Field names in the flatten step are the first thing that breaks when it bumps.</p>
+      </div>
+      <div class="limit">
+        <h3>Reload needs a handle</h3>
+        <p>Served over localhost, reload just refetches. Opened as a bare file path in a browser without the File System Access API, there's no way to re-read from disk — you reopen the file.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
+  <footer>
+    <span>numbat-tools · MIT · not affiliated with Perplexity AI</span>
+    <span>built against numbat v0.1.1 · schema 0.2.0</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var steps = document.querySelectorAll(".step");
+  if(!("IntersectionObserver" in window)){
+    Array.prototype.forEach.call(steps, function(s){ s.classList.add("seen"); });
+    return;
+  }
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){ e.target.classList.add("seen"); io.unobserve(e.target); }
+    });
+  }, { threshold:.15 });
+  Array.prototype.forEach.call(steps, function(s){ io.observe(s); });
+})();
+</script>
+</body>
+</html>

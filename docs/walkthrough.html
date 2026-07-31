@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>numbat — endpoint visibility for agent fleets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Martian+Mono:wght@300;500&family=Public+Sans:ital,wght@0,300;0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bark:#191512;
+    --soil:#221C18;
+    --ridge:#2E2620;
+    --band:#EDE6DA;
+    --dust:#8C7F72;
+    --rufous:#C1532B;
+    --verdigris:#52A88E;
+    --amberline:#D8A24A;
+
+    --display:"Bricolage Grotesque","Helvetica Neue",sans-serif;
+    --body:"Public Sans",system-ui,sans-serif;
+    --mono:"Martian Mono",ui-monospace,"SF Mono",monospace;
+
+    --gut:clamp(20px,4vw,64px);
+    --rule:1px solid rgba(237,230,218,.12);
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bark);color:var(--band);
+    font-family:var(--body);font-weight:300;font-size:16.5px;line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.35;
+    background:repeating-linear-gradient(180deg,rgba(237,230,218,.035) 0 1px,transparent 1px 5px);
+  }
+  .wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:0 var(--gut)}
+
+  h1,h2,h3{font-family:var(--display);font-weight:800;letter-spacing:-.025em;line-height:1.02;margin:0}
+  p{margin:0 0 1.05em}
+  a{color:var(--verdigris)}
+
+  .eyebrow{
+    font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--dust);display:flex;align-items:center;gap:12px;margin-bottom:22px;
+  }
+  .eyebrow::after{content:"";flex:1;height:1px;background:rgba(237,230,218,.14)}
+
+  /* ---------- masthead ---------- */
+  .masthead{border-bottom:var(--rule);padding:22px 0}
+  .masthead .wrap{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  .glyph{display:flex;align-items:center;gap:13px;font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase}
+  .pelt{display:flex;gap:2.5px;align-items:flex-end;height:19px}
+  .pelt i{width:3px;background:var(--rufous);border-radius:1px;animation:pelt 2.6s ease-in-out infinite}
+  .pelt i:nth-child(1){height:8px;animation-delay:0s}
+  .pelt i:nth-child(2){height:13px;animation-delay:.13s}
+  .pelt i:nth-child(3){height:19px;animation-delay:.26s;background:var(--band)}
+  .pelt i:nth-child(4){height:13px;animation-delay:.39s}
+  .pelt i:nth-child(5){height:16px;animation-delay:.52s;background:var(--band)}
+  .pelt i:nth-child(6){height:9px;animation-delay:.65s}
+  @keyframes pelt{0%,100%{transform:scaleY(1);opacity:.85}50%{transform:scaleY(.45);opacity:1}}
+  .masthead nav{display:flex;gap:26px;font-family:var(--mono);font-size:11px;letter-spacing:.09em}
+  .masthead nav a{color:var(--dust);text-decoration:none;transition:color .2s}
+  .masthead nav a:hover{color:var(--band)}
+
+  /* ---------- hero ---------- */
+  .hero{padding:clamp(56px,9vw,110px) 0 clamp(40px,6vw,70px)}
+  .hero h1{font-size:clamp(40px,7.6vw,86px);max-width:14ch}
+  .hero h1 em{font-style:normal;color:var(--rufous)}
+  .lede{font-size:clamp(17px,1.9vw,21px);max-width:56ch;color:rgba(237,230,218,.82);margin-top:26px}
+  .verdict{
+    margin-top:34px;display:flex;flex-wrap:wrap;gap:10px;
+    font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+  }
+  .verdict span{border:1px solid rgba(237,230,218,.16);padding:7px 12px;border-radius:2px;color:var(--dust)}
+  .verdict span b{color:var(--band);font-weight:500}
+
+  /* ---------- signature: the band scanner ---------- */
+  .scanner{
+    margin-top:clamp(44px,6vw,72px);border:var(--rule);background:var(--soil);
+    border-radius:3px;overflow:hidden;
+  }
+  .scanner-head{
+    display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
+    padding:13px 18px;border-bottom:var(--rule);
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dust);
+  }
+  .live{display:flex;align-items:center;gap:8px;color:var(--verdigris)}
+  .live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--verdigris);animation:pulse 1.7s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.7)}}
+
+  .track{position:relative;height:190px;padding:16px 0;overflow:hidden}
+  .gate{
+    position:absolute;top:0;bottom:0;left:58%;width:2px;background:var(--amberline);opacity:.5;z-index:3;
+  }
+  .gate::after{
+    content:"CEL rule gate";position:absolute;top:8px;left:9px;white-space:nowrap;
+    font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--amberline);
+  }
+  .lane{position:relative;height:44px;display:flex;align-items:center;border-bottom:1px dashed rgba(237,230,218,.07)}
+  .lane:last-child{border-bottom:0}
+  .lane-tag{
+    position:absolute;left:18px;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--dust);z-index:2;background:var(--soil);padding-right:10px;
+  }
+  .chip{
+    position:absolute;left:-190px;display:flex;align-items:center;gap:8px;
+    padding:5px 10px;border:1px solid rgba(237,230,218,.2);border-radius:2px;
+    background:var(--ridge);font-family:var(--mono);font-size:10px;white-space:nowrap;
+    animation:sweep 11s linear infinite;
+  }
+  .chip::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--dust)}
+  .chip.flags{animation-name:sweep,flag}
+  .chip.flags::before{background:var(--dust)}
+  @keyframes sweep{
+    0%{transform:translateX(0)}
+    100%{transform:translateX(calc(100vw + 200px))}
+  }
+  @keyframes flag{
+    0%,57%{border-color:rgba(237,230,218,.2);color:var(--band);box-shadow:none}
+    59%{border-color:var(--rufous);color:var(--rufous);box-shadow:0 0 0 4px rgba(193,83,43,.14)}
+    100%{border-color:var(--rufous);color:var(--rufous);box-shadow:0 0 0 4px rgba(193,83,43,.14)}
+  }
+  .scanner-foot{
+    display:flex;gap:26px;flex-wrap:wrap;padding:13px 18px;border-top:var(--rule);
+    font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--dust);
+  }
+  .scanner-foot b{color:var(--band);font-weight:500}
+  .key-rufous{color:var(--rufous)}
+
+  /* ---------- sections ---------- */
+  section{padding:clamp(56px,8vw,104px) 0;border-top:var(--rule)}
+  .sec-title{font-size:clamp(27px,4vw,44px);max-width:20ch;margin-bottom:26px}
+  .sec-lede{max-width:62ch;color:rgba(237,230,218,.78)}
+
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:22px;margin-top:46px}
+  .card{border:var(--rule);background:var(--soil);border-radius:3px;padding:26px 24px}
+  .card h3{font-size:20px;margin-bottom:12px}
+  .card p{font-size:15px;color:rgba(237,230,218,.76);margin-bottom:0}
+  .card .tick{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dust);display:block;margin-bottom:14px}
+
+  /* ---------- pipeline svg ---------- */
+  .pipe{margin-top:44px;border:var(--rule);background:var(--soil);border-radius:3px;padding:clamp(18px,3vw,34px)}
+  .pipe svg{width:100%;height:auto;display:block}
+  .flowline{stroke-dasharray:5 7;animation:flow 1.4s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-24}}
+  .nodebox{fill:var(--ridge);stroke:rgba(237,230,218,.2)}
+  .nodetxt{fill:var(--band);font-family:"Martian Mono",monospace;font-size:10px;letter-spacing:.05em}
+  .nodesub{fill:var(--dust);font-family:"Public Sans",sans-serif;font-size:10.5px}
+  .stage{fill:var(--dust);font-family:"Martian Mono",monospace;font-size:9px;letter-spacing:.18em}
+
+  /* ---------- monitor / enforce ---------- */
+  .toggle{display:inline-flex;border:1px solid rgba(237,230,218,.18);border-radius:2px;overflow:hidden;margin:38px 0 30px}
+  .toggle button{
+    background:transparent;border:0;color:var(--dust);cursor:pointer;padding:11px 22px;
+    font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;transition:.2s;
+  }
+  .toggle button[aria-pressed="true"]{background:var(--band);color:var(--bark)}
+  .toggle button:focus-visible{outline:2px solid var(--verdigris);outline-offset:-2px}
+
+  .gatebox{border:var(--rule);background:var(--soil);border-radius:3px;padding:clamp(20px,3vw,34px);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:34px;align-items:center}
+  .gateviz{position:relative;height:150px;border:1px dashed rgba(237,230,218,.14);border-radius:2px;overflow:hidden;background:var(--bark)}
+  .req{
+    position:absolute;top:50%;left:8%;transform:translateY(-50%);
+    font-family:var(--mono);font-size:10px;padding:6px 10px;border:1px solid var(--rufous);color:var(--rufous);
+    border-radius:2px;background:var(--ridge);animation:req-pass 4s ease-in-out infinite;
+  }
+  .gatebox[data-mode="enforce"] .req{animation-name:req-block}
+  @keyframes req-pass{
+    0%{left:4%;opacity:0}12%{opacity:1}88%{opacity:1}100%{left:76%;opacity:0}
+  }
+  @keyframes req-block{
+    0%{left:4%;opacity:0}18%{left:26%;opacity:1}
+    46%{left:38%}52%{left:33%}58%{left:38%}
+    100%{left:38%;opacity:1}
+  }
+  .barrier{position:absolute;top:0;bottom:0;left:52%;width:3px;background:var(--dust);opacity:.25;transition:.35s}
+  .gatebox[data-mode="enforce"] .barrier{background:var(--rufous);opacity:1;box-shadow:0 0 18px rgba(193,83,43,.4)}
+  .barrier-tag{
+    position:absolute;left:52%;bottom:12px;transform:translateX(-50%);white-space:nowrap;
+    font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dust);
+  }
+  .gatecopy h3{font-size:22px;margin-bottom:14px}
+  .gatecopy p{font-size:15px;color:rgba(237,230,218,.78)}
+  .gatecopy ul{margin:0;padding-left:18px;font-size:14.5px;color:rgba(237,230,218,.74)}
+  .gatecopy li{margin-bottom:8px}
+
+  /* ---------- ladder ---------- */
+  .rung{
+    display:grid;grid-template-columns:64px minmax(0,1fr);gap:clamp(14px,2.5vw,32px);
+    padding:34px 0;border-top:1px dashed rgba(237,230,218,.11);
+    opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s ease;
+  }
+  .rung.seen{opacity:1;transform:none}
+  .rung-n{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--rufous);padding-top:5px}
+  .rung h3{font-size:22px;margin-bottom:10px}
+  .rung p{font-size:15px;color:rgba(237,230,218,.76);max-width:60ch}
+  .risk{font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--dust);border:1px solid rgba(237,230,218,.16);padding:4px 9px;border-radius:2px;display:inline-block;margin-bottom:14px}
+  .risk.warm{color:var(--amberline);border-color:rgba(216,162,74,.4)}
+  .risk.hot{color:var(--rufous);border-color:rgba(193,83,43,.45)}
+
+  pre{
+    margin:16px 0 0;background:var(--soil);border:var(--rule);border-radius:3px;
+    padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12px;font-weight:300;
+    line-height:1.85;color:var(--band);position:relative;
+  }
+  pre .c{color:var(--dust)}
+  pre .f{color:var(--verdigris)}
+  .copy{
+    position:absolute;top:9px;right:9px;background:var(--ridge);border:1px solid rgba(237,230,218,.16);
+    color:var(--dust);font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+    padding:5px 9px;border-radius:2px;cursor:pointer;transition:.2s;
+  }
+  .copy:hover{color:var(--band);border-color:rgba(237,230,218,.4)}
+
+  /* ---------- record anatomy ---------- */
+  .anatomy{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:26px;margin-top:40px;align-items:start}
+  .record{background:var(--soil);border:var(--rule);border-radius:3px;padding:22px 20px;font-family:var(--mono);font-size:12px;line-height:2}
+  .fld{cursor:pointer;border-radius:2px;padding:1px 3px;transition:.18s;border-bottom:1px dotted rgba(237,230,218,.22)}
+  .fld:hover{background:rgba(82,168,142,.14)}
+  .fld[aria-selected="true"]{background:var(--rufous);color:var(--bark);border-bottom-color:transparent}
+  .val{color:var(--verdigris)}
+  .decoder{border:var(--rule);background:var(--soil);border-radius:3px;padding:24px 22px;position:sticky;top:24px}
+  .decoder .tick{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dust);display:block;margin-bottom:12px}
+  .decoder h3{font-size:18px;margin-bottom:12px;font-family:var(--mono);letter-spacing:-.01em;font-weight:500}
+  .decoder p{font-size:14.5px;color:rgba(237,230,218,.78);margin-bottom:0}
+
+  /* ---------- rules ---------- */
+  .filters{display:flex;flex-wrap:wrap;gap:8px;margin:36px 0 28px}
+  .filters button{
+    background:transparent;border:1px solid rgba(237,230,218,.16);color:var(--dust);cursor:pointer;
+    padding:7px 13px;border-radius:2px;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;transition:.2s;
+  }
+  .filters button:hover{color:var(--band)}
+  .filters button[aria-pressed="true"]{background:var(--rufous);border-color:var(--rufous);color:var(--bark)}
+  .filters button:focus-visible{outline:2px solid var(--verdigris);outline-offset:2px}
+  .rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+  .rule{border:var(--rule);background:var(--soil);border-radius:3px;padding:15px 17px;transition:opacity .3s,transform .3s}
+  .rule.hide{display:none}
+  .rule code{font-family:var(--mono);font-size:11px;color:var(--amberline);display:block;margin-bottom:7px}
+  .rule span{font-size:14px;color:rgba(237,230,218,.74);line-height:1.5}
+
+  .callout{
+    border-left:2px solid var(--rufous);background:rgba(193,83,43,.07);
+    padding:20px 24px;border-radius:0 3px 3px 0;margin-top:34px;
+  }
+  .callout p{font-size:15px;margin-bottom:0;color:rgba(237,230,218,.85)}
+  .callout strong{color:var(--band);font-weight:600}
+
+  .limits{margin-top:40px;border-top:var(--rule)}
+  .limit{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:26px;padding:22px 0;border-bottom:1px dashed rgba(237,230,218,.1)}
+  .limit h3{font-size:16px;font-family:var(--body);font-weight:600;letter-spacing:0}
+  .limit p{font-size:14.5px;color:rgba(237,230,218,.72);margin:0}
+
+  footer{padding:52px 0 70px;border-top:var(--rule);font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;color:var(--dust);display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+
+  @media (max-width:860px){
+    .anatomy,.gatebox,.limit{grid-template-columns:1fr}
+    .decoder{position:static}
+    .masthead nav{display:none}
+    .rung{grid-template-columns:1fr}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+    .rung{opacity:1;transform:none}
+    html{scroll-behavior:auto}
+  }
+</style>
+</head>
+<body>
+
+<div class="masthead">
+  <div class="wrap">
+    <div class="glyph">
+      <span class="pelt"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      numbat <span style="color:var(--dust)">v0.1.1 · apache-2.0</span>
+    </div>
+    <nav>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#modes">Modes</a>
+      <a href="#setup">Setup</a>
+      <a href="#logs">Logs</a>
+      <a href="#detects">Detections</a>
+      <a href="#fleet">Fleet</a>
+    </nav>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="hero">
+    <div class="eyebrow">Perplexity · released 29 July 2026</div>
+    <h1>Your agents already run commands. This <em>writes them down</em>.</h1>
+    <p class="lede">numbat is a single Go binary that sits on the endpoint and turns what your coding agents actually do — files read, commands proposed, URLs fetched — into one typed, greppable record stream. It reads what agents already wrote to disk, and it can hook into them live. Detection runs on the machine. Nothing leaves unless you point it somewhere.</p>
+    <div class="verdict">
+      <span>Not a <b>SaaS</b></span>
+      <span>Not a <b>proxy</b></span>
+      <span>Not a <b>daemon</b></span>
+      <span>No <b>account</b>, no <b>telemetry home</b></span>
+      <span>Blocking is <b>off by default</b></span>
+    </div>
+  </div>
+
+  <div class="scanner" aria-label="Illustration of the record stream passing a rule gate">
+    <div class="scanner-head">
+      <span>record stream · schema 0.2.0</span>
+      <span class="live">detection running locally</span>
+    </div>
+    <div class="track">
+      <div class="gate"></div>
+
+      <div class="lane">
+        <span class="lane-tag">hook</span>
+        <div class="chip" style="animation-delay:0s">command.exec — npm test</div>
+        <div class="chip flags" style="animation-delay:-4.4s">file.read — .env.production</div>
+        <div class="chip" style="animation-delay:-8.1s">tool.call — Edit</div>
+      </div>
+
+      <div class="lane">
+        <span class="lane-tag">otlp</span>
+        <div class="chip" style="animation-delay:-1.9s">prompt.user — 412 tokens</div>
+        <div class="chip" style="animation-delay:-6.2s">command.result — exit 0</div>
+        <div class="chip flags" style="animation-delay:-9.6s">network.indicator — 169.254.169.254</div>
+      </div>
+
+      <div class="lane">
+        <span class="lane-tag">at rest</span>
+        <div class="chip" style="animation-delay:-3.1s">session.start — silicon-hills-platform</div>
+        <div class="chip" style="animation-delay:-7.4s">file.write — route.js</div>
+        <div class="chip" style="animation-delay:-10.5s">config.change — settings.json</div>
+      </div>
+    </div>
+    <div class="scanner-foot">
+      <span><b>three inputs</b> · one event model</span>
+      <span class="key-rufous"><b>rust</b> = rule matched, finding emitted</span>
+      <span><b>output</b> · NDJSON to file, stdout, or HTTP</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ WHAT IT IS ============ -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">In plain terms</div>
+    <h2 class="sec-title">Three things it does, described the way you'd describe them to Kallen.</h2>
+    <p class="sec-lede">Strip the security vocabulary and it's an accountant, a smoke alarm, and a black-box recorder — running on the same laptop as the agent, not in someone's cloud.</p>
+
+    <div class="grid3">
+      <div class="card">
+        <span class="tick">Accountant</span>
+        <h3>It writes down what the agent did</h3>
+        <p>Every command, file touch, URL, and MCP call becomes one line of JSON with a timestamp, session ID, project path, and which agent did it. You get a searchable ledger of agent behavior instead of a chat transcript you'd have to read.</p>
+      </div>
+      <div class="card">
+        <span class="tick">Smoke alarm</span>
+        <h3>It flags the shapes that matter</h3>
+        <p>About fifty built-in rules watch for known-bad patterns: reading a credential file, piping a download into a shell, writing to <code>authorized_keys</code>, hitting cloud metadata. Six of them are multi-step — read a secret, <em>then</em> upload something.</p>
+      </div>
+      <div class="card">
+        <span class="tick">Black box</span>
+        <h3>It reconstructs sessions after the fact</h3>
+        <p>Agents already leave transcripts on disk. numbat parses those directly, so you can investigate a machine you never instrumented — including one you're handed after something went wrong.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PIPELINE ============ -->
+<section id="pipeline">
+  <div class="wrap">
+    <div class="eyebrow">How the data moves</div>
+    <h2 class="sec-title">Three ways in. One event model. One rule engine.</h2>
+    <p class="sec-lede">This is the whole architecture. Whether a record arrives from a live hook, an OpenTelemetry log, or a JSONL file on disk, it gets normalized into the same shape and evaluated by the same CEL rules. That's why a rule you write for forensic scanning also works live.</p>
+
+    <div class="pipe">
+      <svg viewBox="0 0 1000 330" role="img" aria-label="Flow diagram: hooks, OTLP logs and on-disk artifacts feed a normalizer, then a CEL rule engine, then out to file, stdout or HTTP sinks">
+        <text class="stage" x="20" y="20">INPUTS</text>
+        <text class="stage" x="352" y="20">NORMALIZE</text>
+        <text class="stage" x="580" y="20">EVALUATE</text>
+        <text class="stage" x="815" y="20">SINKS</text>
+
+        <!-- inputs -->
+        <rect class="nodebox" x="20" y="46" width="238" height="62" rx="3"/>
+        <text class="nodetxt" x="36" y="72">hook install</text>
+        <text class="nodesub" x="36" y="92">synchronous, pre-action, can block</text>
+
+        <rect class="nodebox" x="20" y="132" width="238" height="62" rx="3"/>
+        <text class="nodetxt" x="36" y="158">collect (OTLP)</text>
+        <text class="nodesub" x="36" y="178">127.0.0.1:4318 — logs only, no gRPC</text>
+
+        <rect class="nodebox" x="20" y="218" width="238" height="62" rx="3"/>
+        <text class="nodetxt" x="36" y="244">scan / timeline</text>
+        <text class="nodesub" x="36" y="264">reads transcripts already on disk</text>
+
+        <!-- lines in -->
+        <path class="flowline" d="M258 77 H352" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
+        <path class="flowline" d="M258 163 H352" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
+        <path class="flowline" d="M258 249 H352" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
+        <path d="M352 77 V249" stroke="rgba(237,230,218,.2)" stroke-width="1" fill="none"/>
+
+        <!-- normalize -->
+        <rect class="nodebox" x="352" y="128" width="170" height="70" rx="3"/>
+        <text class="nodetxt" x="368" y="156">event model</text>
+        <text class="nodesub" x="368" y="176">typed · redacted · session-</text>
+        <text class="nodesub" x="368" y="190">correlated</text>
+
+        <path class="flowline" d="M522 163 H580" stroke="var(--verdigris)" stroke-width="1.5" fill="none"/>
+
+        <!-- rules -->
+        <rect class="nodebox" x="580" y="112" width="170" height="102" rx="3" stroke="var(--amberline)"/>
+        <text class="nodetxt" x="596" y="140" style="fill:var(--amberline)">CEL rules</text>
+        <text class="nodesub" x="596" y="160">built-in catalog</text>
+        <text class="nodesub" x="596" y="176">+ your --rules-dir</text>
+        <text class="nodesub" x="596" y="196">stateless + sequence</text>
+
+        <!-- out -->
+        <path class="flowline" d="M750 163 H800 V72 H860" stroke="var(--rufous)" stroke-width="1.5" fill="none"/>
+        <path class="flowline" d="M750 163 H860" stroke="var(--rufous)" stroke-width="1.5" fill="none"/>
+        <path class="flowline" d="M750 163 H800 V254 H860" stroke="var(--rufous)" stroke-width="1.5" fill="none"/>
+
+        <rect class="nodebox" x="860" y="46" width="122" height="52" rx="3"/>
+        <text class="nodetxt" x="874" y="70">file</text>
+        <text class="nodesub" x="874" y="87">~/.numbat/*.ndjson</text>
+
+        <rect class="nodebox" x="860" y="137" width="122" height="52" rx="3"/>
+        <text class="nodetxt" x="874" y="161">stdout</text>
+        <text class="nodesub" x="874" y="178">pipe into jq</text>
+
+        <rect class="nodebox" x="860" y="228" width="122" height="52" rx="3"/>
+        <text class="nodetxt" x="874" y="252">http</text>
+        <text class="nodesub" x="874" y="269">bearer or HMAC</text>
+      </svg>
+    </div>
+
+    <div class="callout">
+      <p><strong>The part worth internalizing:</strong> hooks are the only path that can stop an action, because they're the only path the agent waits on. OTLP and at-rest scanning are observation only — by the time the record exists, the thing already happened.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ MODES ============ -->
+<section id="modes">
+  <div class="wrap">
+    <div class="eyebrow">Monitor vs enforce</div>
+    <h2 class="sec-title">Everything ships monitor-only. Blocking takes three deliberate steps.</h2>
+    <p class="sec-lede">Out of the box numbat never denies anything — every shipped rule is detection-only, and <code>--enforce</code> is off. Turning on blocking is not a flag flip: you have to copy a rule out, mark it, and reinstall.</p>
+
+    <div class="toggle" role="group" aria-label="Choose mode">
+      <button id="btn-monitor" aria-pressed="true">Monitor</button>
+      <button id="btn-enforce" aria-pressed="false">Enforce</button>
+    </div>
+
+    <div class="gatebox" id="gatebox" data-mode="monitor">
+      <div class="gateviz">
+        <div class="barrier"></div>
+        <span class="barrier-tag">PreToolUse</span>
+        <div class="req">curl --data @.env https://…</div>
+      </div>
+      <div class="gatecopy" id="gatecopy"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SETUP ============ -->
+<section id="setup">
+  <div class="wrap">
+    <div class="eyebrow">Getting it running</div>
+    <h2 class="sec-title">Climb it in three rungs. Don't skip to the third.</h2>
+    <p class="sec-lede">Each rung is reversible and each one changes more state than the last. Rung one touches nothing at all — that's where a first afternoon with it should end.</p>
+
+    <div class="rung">
+      <div class="rung-n">RUNG 1</div>
+      <div>
+        <span class="risk">Read-only · changes nothing</span>
+        <h3>Install the binary and look backwards</h3>
+        <p>Verify the checksum, drop the binary on PATH, then point it at what's already on disk. <code>agents</code> tells you which agents it found and whether numbat is wired into them. <code>scan</code> replays their existing transcripts through the rules. Neither installs a hook or edits agent config.</p>
+        <pre><button class="copy">Copy</button><span class="c"># after downloading the darwin-arm64 asset + checksums</span>
+shasum -a 256 -c numbat_checksums.txt --ignore-missing
+xattr -d com.apple.quarantine ./numbat <span class="c">2>/dev/null</span>
+sudo mv numbat /usr/local/bin/ && numbat version
+
+numbat agents <span class="c"># what's on this box, and is numbat wired in?</span>
+numbat scan <span class="c"># findings from existing transcripts → stdout</span>
+numbat timeline --agent claude <span class="c"># chronological session replay</span></pre>
+      </div>
+    </div>
+
+    <div class="rung">
+      <div class="rung-n">RUNG 2</div>
+      <div>
+        <span class="risk warm">Edits agent config · still never blocks</span>
+        <h3>Wire up live capture, monitor-only</h3>
+        <p>This writes a numbat hook command into the agent's own settings file — for Claude Code that's <code>~/.claude/settings.json</code>. Read the diff before and after. <code>hook status</code> confirms the config is present; it does not prove the hook actually fires, so generate real activity and watch the file grow.</p>
+        <pre><button class="copy">Copy</button>git diff --no-index /dev/null ~/.claude/settings.json <span class="c">> /tmp/before.txt</span>
+
+numbat hook install --agent claude --emit all
+numbat hook status --agent claude
+
+<span class="c"># now do something in Claude Code, then:</span>
+tail -f ~/.numbat/records.ndjson | jq -c '{t:.timestamp, k:.record_type, a:.source_agent, r:.rule_id}'</pre>
+      </div>
+    </div>
+
+    <div class="rung">
+      <div class="rung-n">RUNG 3</div>
+      <div>
+        <span class="risk hot">Can interrupt live agent work</span>
+        <h3>Promote one rule to enforce</h3>
+        <p>You cannot enforce a shipped rule in place. Copy its YAML into a directory you control, keep the same <code>id</code>, add <code>enforce: true</code>, bump the <code>version</code>, validate, then reinstall pointing at that directory. Install refuses to proceed if the compiled catalog has no enabled enforcing rule — so a typo fails loudly instead of silently doing nothing.</p>
+        <pre><button class="copy">Copy</button>mkdir -p ~/numbat-policy
+<span class="c"># copy rules/persistence/ssh_authorized_keys.yaml from the repo,</span>
+<span class="c"># keep the id, add `enforce: true`, bump `version`</span>
+
+numbat rules check --rules-dir ~/numbat-policy
+numbat rules list --rules-dir ~/numbat-policy
+
+numbat hook install --agent claude --emit all \
+  --rules-dir ~/numbat-policy --enforce</pre>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p><strong>Fish shell note:</strong> the docs use <code>VAR=x command</code> inline assignment, which bash accepts and fish does not. Use <code>env NUMBAT_HTTP_TOKEN=… numbat ship …</code> or set it with <code>set -x</code> first. Auth secrets are read from the environment only — they're never accepted as flags and never written into hook config.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ LOGS ============ -->
+<section id="logs">
+  <div class="wrap">
+    <div class="eyebrow">Where the logs live</div>
+    <h2 class="sec-title">One NDJSON stream. Five record types. Click a field.</h2>
+    <p class="sec-lede">Default paths sit under <code>~/.numbat/</code>: <code>findings.ndjson</code> if you only asked for findings, <code>records.ndjson</code> once you add events or indicators. numbat never rotates these files — retention is yours. Below is a finding of the shape you'd get if an agent read a secrets file and then proposed an upload.</p>
+
+    <div class="anatomy">
+      <div class="record" id="record">
+<span class="c">{</span>
+  "<span class="fld" data-k="record_type">record_type</span>": <span class="val">"finding"</span>,
+  "<span class="fld" data-k="schema_version">schema_version</span>": <span class="val">"0.2.0"</span>,
+  "<span class="fld" data-k="rule_id">rule_id</span>": <span class="val">"chain.secret_read_then_egress"</span>,
+  "<span class="fld" data-k="severity">severity</span>": <span class="val">"high"</span>,
+  "<span class="fld" data-k="confidence">confidence</span>": <span class="val">"medium"</span>,
+  "<span class="fld" data-k="cited_event_ids">cited_event_ids</span>": <span class="val">[ … , … ]</span>,
+  "<span class="fld" data-k="observed_command">observed_command</span>": <span class="val">"curl --data-binary @…"</span>,
+  "<span class="fld" data-k="project_path_hash">project_path_hash</span>": <span class="val">"sha256:6780ee…"</span>,
+  "<span class="fld" data-k="session_id">session_id</span>": <span class="val">"sess-…"</span>,
+  "<span class="fld" data-k="source_agent">source_agent</span>": <span class="val">"claude-code"</span>,
+  "<span class="fld" data-k="source_type">source_type</span>": <span class="val">"hook"</span>,
+  "<span class="fld" data-k="endpoint">endpoint</span>": <span class="val">{ hostname, os, arch, … }</span>,
+  "<span class="fld" data-k="evidence_refs">evidence_refs</span>": <span class="val">[ { artifact_type } ]</span>,
+  "<span class="fld" data-k="redacted">redacted</span>": <span class="val">false</span>,
+  "<span class="fld" data-k="tags">tags</span>": <span class="val">["attack.t1552","attack.t1567"]</span>,
+  "<span class="fld" data-k="detected_at">detected_at</span>": <span class="val">"2026-07-31T…"</span>
+<span class="c">}</span>
+      </div>
+      <div class="decoder" id="decoder">
+        <span class="tick">Field decoder</span>
+        <h3>Pick a field</h3>
+        <p>Click any key on the left to see what it actually means and how to use it in a query.</p>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p><strong>The trap in that record:</strong> <code>confidence</code> is not "how likely is this malicious." It's how sure the parser is that it read the source correctly. A high-severity, high-confidence finding still only means a rule matched a proposed action — pre-action hooks fire <em>before</em> the thing happens, so a finding never proves the command ran.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ DETECTIONS ============ -->
+<section id="detects">
+  <div class="wrap">
+    <div class="eyebrow">What it looks for</div>
+    <h2 class="sec-title">The shipped catalog, grouped by what an attacker would be doing.</h2>
+    <p class="sec-lede">These are the built-in rule IDs. All monitor-only. The last group is the interesting one — sequences correlate two steps inside a window, which is where single-event detection usually falls down.</p>
+
+    <div class="filters" role="group" aria-label="Filter detections">
+      <button data-f="all" aria-pressed="true">All</button>
+      <button data-f="secrets" aria-pressed="false">Secrets</button>
+      <button data-f="exfil" aria-pressed="false">Exfiltration</button>
+      <button data-f="exec" aria-pressed="false">Execution</button>
+      <button data-f="priv" aria-pressed="false">Privilege</button>
+      <button data-f="persist" aria-pressed="false">Persistence</button>
+      <button data-f="tamper" aria-pressed="false">Tampering</button>
+      <button data-f="chain" aria-pressed="false">Sequences</button>
+    </div>
+
+    <div class="rules" id="rules"></div>
+
+    <div class="callout">
+      <p><strong>Expect noise on your boxes specifically.</strong> An autonomous fleet running with reduced approval modes will trip <code>tamper.guardrails_off</code> and <code>exec.agent_runtime_bypass_flags</code> constantly. Governance work that edits hooks and settings trips <code>tamper.agent_config_write</code>. Baseline with a full <code>scan</code> first, see what fires against normal operation, then decide which rules to disable by ID before you ever consider enforce mode.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FLEET ============ -->
+<section id="fleet">
+  <div class="wrap">
+    <div class="eyebrow">Beyond one laptop</div>
+    <h2 class="sec-title">Rolling it onto builder machines without building a SIEM.</h2>
+    <p class="sec-lede">numbat is a single static binary with no daemon and no cgo, so distribution is just copying a file. The two decisions that matter are how records get off the box, and whether you can tell the boxes apart.</p>
+
+    <div class="grid3">
+      <div class="card">
+        <span class="tick">Identity</span>
+        <h3>Tag each endpoint</h3>
+        <p>Every record already carries hostname, OS, arch, and username. Set <code>NUMBAT_DEVICE_ID</code> in each machine's environment to add a stable opaque ID, so a rebuilt or renamed machine still joins to its own history.</p>
+      </div>
+      <div class="card">
+        <span class="tick">Delivery</span>
+        <h3>Write to file, ship separately</h3>
+        <p>Direct HTTP from the hook is not a durable queue — a failed batch retries once and then drops oldest-first. Write hooks to file, and run <code>numbat ship</code> alongside to tail that file to an ingest endpoint with at-least-once delivery and checkpointing.</p>
+      </div>
+      <div class="card">
+        <span class="tick">Scope</span>
+        <h3>Managed install for shared boxes</h3>
+        <p>Claude Code, Codex, Cursor, Copilot, Gemini, Windsurf, Qwen, and Auggie expose admin-managed hook config. <code>hook install --managed</code> targets those instead of a single user's file — the right choice for a machine multiple people or agents use.</p>
+      </div>
+    </div>
+
+    <pre style="margin-top:26px"><button class="copy">Copy</button><span class="c"># on each builder box: capture to file, forward out of band</span>
+numbat hook install --agent claude --emit all \
+  --output file --output-file ~/.numbat/records.ndjson
+
+env NUMBAT_HTTP_TOKEN=$TOKEN numbat ship \
+  --input-file ~/.numbat/records.ndjson \
+  --http-url https://your-ingest/numbat \
+  --http-auth bearer</pre>
+
+    <div class="callout">
+      <p><strong>Rotation is on you.</strong> numbat never truncates or rotates its own output, and <code>ship</code> never touches the input file. Without logrotate or equivalent, <code>--emit all</code> on an active agent fleet will grow unbounded. Start with findings-only on secondary machines and promote to full events where you actually need them.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ LIMITS ============ -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">Read this before you trust it</div>
+    <h2 class="sec-title">What it does not do.</h2>
+    <p class="sec-lede">The project is unusually honest about its own edges, which is a good sign. These are the ones that would actually bite you.</p>
+
+    <div class="limits">
+      <div class="limit">
+        <h3>It's two days old</h3>
+        <p>First public release landed 29 July 2026 at v0.1.1. Record schema is 0.2.0 and will move. Treat anything you build on the record shape as pinned to a version, and expect the rule catalog to churn.</p>
+      </div>
+      <div class="limit">
+        <h3>A finding is not an incident</h3>
+        <p>Rules match patterns. Pre-action hooks describe requests, not outcomes. Nothing here proves an action completed, and a scan can only ever see what the agent chose to persist.</p>
+      </div>
+      <div class="limit">
+        <h3>Hooks aren't a security boundary</h3>
+        <p>Enforcement only covers synchronous pre-action callbacks. Hosted tools that never touch the local hook path bypass it entirely, and most agents fail open on hook error or timeout. It raises the cost of a bad action; it doesn't prevent one.</p>
+      </div>
+      <div class="limit">
+        <h3>Records hold sensitive context</h3>
+        <p>Redaction runs before emission, but endpoint identity, project paths, and command text still land in the output. That file is now a thing worth protecting — and it's plaintext on disk by default.</p>
+      </div>
+      <div class="limit">
+        <h3>The collector has no auth</h3>
+        <p>The OTLP receiver ships with no TLS and no client authentication. Keep it bound to loopback. Anything that can reach it can inject telemetry into your own detection stream.</p>
+      </div>
+      <div class="limit">
+        <h3>Installing it modifies your agents</h3>
+        <p>Rung two writes a command into the config your agents execute — structurally the same class of change as a malicious hook install. The difference is that you initiated it and can read the diff. Read the diff.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
+  <footer>
+    <span>github.com/perplexityai/numbat · Apache-2.0 · v0.1.1</span>
+    <span>Prepared 31 July 2026</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- mode toggle ---------- */
+  var copy = {
+    monitor: {
+      h: "Monitor — the default",
+      p: "The hook runs, the record is written, and the agent's action proceeds untouched. numbat returns the agent's own non-blocking response and exits clean.",
+      li: [
+        "Every shipped rule is monitor-only, no exceptions.",
+        "Hook stdout belongs to the agent, so monitor records go to stderr or a file — never into the agent's control channel.",
+        "If numbat errors or crashes, the agent carries on. Fail open by design.",
+        "This is where you should live for at least the first week."
+      ]
+    },
+    enforce: {
+      h: "Enforce — opt-in, per rule",
+      p: "On a matched pre-action callback from a rule you explicitly marked enforcing, numbat returns that agent's native deny and the action never runs. An enforcement record joins back to the finding that caused it.",
+      li: [
+        "Requires a rule with enforce: true — install refuses if the catalog has none.",
+        "Requires a file or HTTP sink; stdout is rejected outright in this mode.",
+        "Any ambiguity — decode error, missing sequence state, internal panic — suppresses the deny.",
+        "A sequence rule can only block its final step. The earlier steps already happened."
+      ]
+    }
+  };
+
+  var box = document.getElementById("gatebox");
+  var out = document.getElementById("gatecopy");
+  var bM = document.getElementById("btn-monitor");
+  var bE = document.getElementById("btn-enforce");
+
+  function render(mode){
+    var c = copy[mode];
+    out.innerHTML = "<h3>" + c.h + "</h3><p>" + c.p + "</p><ul>" +
+      c.li.map(function(x){ return "<li>" + x + "</li>"; }).join("") + "</ul>";
+    box.setAttribute("data-mode", mode);
+    bM.setAttribute("aria-pressed", String(mode === "monitor"));
+    bE.setAttribute("aria-pressed", String(mode === "enforce"));
+  }
+  bM.addEventListener("click", function(){ render("monitor"); });
+  bE.addEventListener("click", function(){ render("enforce"); });
+  render("monitor");
+
+  /* ---------- field decoder ---------- */
+  var fields = {
+    record_type: ["record_type", "One of event, finding, enforcement, indicator, or scan_summary. Route on this first — it tells you which schema the rest of the line follows."],
+    schema_version: ["schema_version", "The record contract version, currently 0.2.0. It moves independently of the tool version, and only when the emitted shape actually changes. Pin your parsers to it."],
+    rule_id: ["rule_id", "Which rule matched. Stable across versions, which makes it the right key for suppression lists and for counting noise during your baseline."],
+    severity: ["severity", "The rule author's judgment of impact if the pattern is real. Set per rule in YAML, so your own rules control their own severity."],
+    confidence: ["confidence", "Parser certainty, not maliciousness. High means direct source evidence; medium and low mean numbat inferred or best-effort normalized the event. Do not alert-rank on this."],
+    cited_event_ids: ["cited_event_ids", "The exact events that produced this finding. For a sequence rule you get every step. This is the join key back into the event stream — capture --emit all or these point at nothing."],
+    observed_command: ["observed_command", "The command text as normalized, post-redaction. For pre-action hooks this is what was proposed, not what executed."],
+    project_path_hash: ["project_path_hash", "A stable unsalted SHA-256 of the project path. It's a join key, not anonymization — treat it as pseudonymous metadata. Events keep a readable project_path instead."],
+    session_id: ["session_id", "Groups a conversation. It's also what sequence correlation windows on, so agents that don't emit one (Junie, for instance) can't produce chain findings."],
+    source_agent: ["source_agent", "Which agent produced it — claude-code, codex, cursor, and so on. Useful for per-agent noise profiles when you run a mixed fleet."],
+    source_type: ["source_type", "How it arrived: hook, otlp, or an at-rest artifact. This tells you whether the record could have blocked anything, and how fresh it is."],
+    endpoint: ["endpoint", "hostname, os, arch, username, uid — on every single line. Add NUMBAT_DEVICE_ID to the environment for a stable opaque ID that survives hostname changes."],
+    evidence_refs: ["evidence_refs", "Pointers back to the source. File-backed evidence keeps local_path so you can reopen it; live hook and OTLP records may have no file to point at."],
+    redacted: ["redacted", "True means at least one field in this finding was masked. Useful signal that you're looking at a partial view of the original."],
+    tags: ["tags", "MITRE ATT&CK technique IDs and category labels. Free correlation if you already map detections to ATT&CK anywhere else."],
+    detected_at: ["detected_at", "When numbat created the finding. Distinct from timestamp, which is when the activity happened — for a sequence, the time of the completing event."]
+  };
+
+  var decoder = document.getElementById("decoder");
+  var flds = document.querySelectorAll(".fld");
+  Array.prototype.forEach.call(flds, function(el){
+    el.setAttribute("tabindex","0");
+    el.setAttribute("role","button");
+    function pick(){
+      Array.prototype.forEach.call(flds, function(o){ o.setAttribute("aria-selected","false"); });
+      el.setAttribute("aria-selected","true");
+      var f = fields[el.getAttribute("data-k")];
+      decoder.innerHTML = '<span class="tick">Field decoder</span><h3>' + f[0] + '</h3><p>' + f[1] + '</p>';
+    }
+    el.addEventListener("click", pick);
+    el.addEventListener("keydown", function(e){
+      if(e.key === "Enter" || e.key === " "){ e.preventDefault(); pick(); }
+    });
+  });
+
+  /* ---------- rule catalog ---------- */
+  var rules = [
+    ["secrets","secrets.agent_read_env","A .env-style file was read or requested."],
+    ["secrets","secrets.read_private_key","An SSH key, AWS credential, kubeconfig, or registry config was read."],
+    ["secrets","secrets.cloud_credential_read","gcloud application-default credentials or GitHub CLI host tokens."],
+    ["secrets","secrets.browser_session_store_read","Cookie, login, or key database pulled from a browser profile."],
+    ["secrets","secrets.cloud_secret_manager_read","A secret value requested from AWS, GCP, Azure, Kubernetes, or Vault."],
+    ["secrets","secrets.workload_identity_token_read","A projected Kubernetes, EKS, or Azure workload identity token."],
+    ["secrets","secrets.developer_credential_read","Git, netrc, PostgreSQL, Hugging Face, Poetry, or Kaggle credential stores."],
+    ["secrets","secrets.process_environment_read","A process environment block read out of /proc."],
+
+    ["exfil","exfil.env_capture_to_network","Captured environment output fed into a data-bearing curl or wget."],
+    ["exfil","exfil.curl_post_file","A credential or token file referenced in a curl data or form request."],
+    ["exfil","exfil.dns_tunnel_exec","A resolver run with a query name built from command substitution."],
+    ["exfil","exfil.secret_read_and_egress_oneliner","One command that both requests a secret and proposes an outbound transfer."],
+
+    ["exec","exec.download_pipe_shell","A download piped straight into an interpreter."],
+    ["exec","exec.reverse_shell","An interactive shell connected over a network transport."],
+    ["exec","exec.reverse_tunnel","An SSH remote forward, or an explicit Chisel or Ligolo tunnel."],
+    ["exec","exec.encoded_payload_shell","Base64-decoded content piped directly into a shell."],
+    ["exec","exec.destructive_recursive_delete","rm -rf aimed at filesystem root or the user's home."],
+    ["exec","exec.agent_runtime_bypass_flags","An agent launched with a known approval or sandbox bypass flag."],
+    ["exec","recon.cloud_metadata","A fetch aimed at a cloud instance-metadata service."],
+    ["exec","recon.privilege_escalation","Sudo grants listed, or system roots searched for setid files."],
+    ["exec","recon.network_sweep","A named scanner given a target list and a network range."],
+
+    ["priv","privilege.sudoers_tamper","An action targeting /etc/sudoers or /etc/sudoers.d."],
+    ["priv","privilege.container_host_escape","Docker or Podman launched with host-escape primitives."],
+    ["priv","privilege.access_control_mutation","A setuid bit, dangerous capability, or protected-path ACL change."],
+    ["priv","privilege.elevated_shell","An interactive root shell via sudo, doas, su, or pkexec."],
+    ["priv","privilege.container_runtime_socket_access","A CLI addressing a Docker, containerd, CRI-O, or Podman socket."],
+    ["priv","privilege.host_namespace_entry","PID 1 namespace or /proc/1/root access across a container boundary."],
+    ["priv","lateral.workload_exec","Execution or debugging requested inside another workload."],
+    ["priv","impact.cryptomining_launch","A known miner binary, entrypoint, or image basename."],
+    ["priv","impact.disk_wipe","A destructive disk, partition, or block-device operation."],
+    ["priv","impact.fork_bomb","A canonical unbounded recursive-fork payload."],
+    ["priv","impact.mass_process_termination","Force-killing every accessible process."],
+
+    ["persist","persistence.shell_profile_write","A shell startup file modified."],
+    ["persist","persistence.scheduler_install","A scheduled or background job, or a standard autostart path."],
+    ["persist","persistence.git_hook_write","A .git/hooks path modified, excluding .sample stubs."],
+    ["persist","persistence.ssh_authorized_keys","A structured write to a user authorized_keys file."],
+    ["persist","persistence.ssh_authorized_keys_command","A shell or PowerShell command modifying authorized_keys."],
+    ["persist","persistence.privileged_account_change","UID 0, or membership in a privileged or remote-login group."],
+
+    ["tamper","tamper.agent_config_write","An agent hook, settings, plugin surface, or .mcp.json mutated."],
+    ["tamper","tamper.detector_state_write","Something targeting numbat's own $HOME/.numbat state directory."],
+    ["tamper","tamper.guardrails_off","The session is running in a reduced-approval permission mode."],
+    ["tamper","integrity.git_hooks_bypass","A commit or push bypassing hooks, or core.hooksPath disabled."],
+    ["tamper","integrity.history_tamper","Shell history disabled, cleared, or deleted."],
+    ["tamper","source.git_remote_tamper","A Git remote or URL rewrite added or changed."],
+    ["tamper","source.git_config_exec","A Git setting that can invoke an external program during normal operations."],
+
+    ["chain","chain.secret_read_then_egress","Secret file access, then a proposed data-bearing outbound action."],
+    ["chain","chain.secret_manager_read_then_egress","A secret-manager read, then a proposed outbound transfer."],
+    ["chain","chain.guardrails_off_then_egress","Reduced-approval mode, then a proposed data-bearing egress."],
+    ["chain","chain.permission_denied_then_runtime_bypass","A permission denial, then a child agent launched with bypass flags."],
+    ["chain","chain.workload_identity_then_lateral_execution","Workload token access, then execution in another workload."],
+    ["chain","chain.privilege_discovery_then_elevation","Privilege enumeration, then an elevation-capable action."]
+  ];
+
+  var host = document.getElementById("rules");
+  host.innerHTML = rules.map(function(r){
+    return '<div class="rule" data-g="' + r[0] + '"><code>' + r[1] + '</code><span>' + r[2] + '</span></div>';
+  }).join("");
+
+  var fbtns = document.querySelectorAll(".filters button");
+  Array.prototype.forEach.call(fbtns, function(b){
+    b.addEventListener("click", function(){
+      var f = b.getAttribute("data-f");
+      Array.prototype.forEach.call(fbtns, function(o){
+        o.setAttribute("aria-pressed", String(o === b));
+      });
+      Array.prototype.forEach.call(host.children, function(card){
+        var match = (f === "all") || (card.getAttribute("data-g") === f);
+        card.classList.toggle("hide", !match);
+      });
+    });
+  });
+
+  /* ---------- copy buttons ---------- */
+  Array.prototype.forEach.call(document.querySelectorAll(".copy"), function(btn){
+    btn.addEventListener("click", function(){
+      var pre = btn.parentNode.cloneNode(true);
+      var b = pre.querySelector(".copy");
+      if(b) b.remove();
+      var text = pre.textContent.replace(/^\s+|\s+$/g, "");
+      var done = function(){
+        var was = btn.textContent;
+        btn.textContent = "Copied";
+        setTimeout(function(){ btn.textContent = was; }, 1400);
+      };
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(done, function(){});
+      } else {
+        var ta = document.createElement("textarea");
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); done(); } catch(e){}
+        document.body.removeChild(ta);
+      }
+    });
+  });
+
+  /* ---------- scroll reveal ---------- */
+  var rungs = document.querySelectorAll(".rung");
+  if("IntersectionObserver" in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){ e.target.classList.add("seen"); io.unobserve(e.target); }
+      });
+    }, { threshold: .15 });
+    Array.prototype.forEach.call(rungs, function(r){ io.observe(r); });
+  } else {
+    Array.prototype.forEach.call(rungs, function(r){ r.classList.add("seen"); });
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+# ── Record data: NEVER commit ────────────────────────────────────────────
+# numbat records contain plaintext agent commands, prompts, project paths,
+# hostnames, and usernames. Treat every one of these as sensitive.
+*.ndjson
+*.jsonl
+*.ndjson.gz
+*.ship-state
+archive/
+records*
+findings*
+numbat-baseline*
+*.log
+
+# ── Generated / local ────────────────────────────────────────────────────
+bin/
+dist/
+/numbatd/numbatd
+*.plist.local
+
+# ── macOS ────────────────────────────────────────────────────────────────
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# ── Editors ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── Go ───────────────────────────────────────────────────────────────────
+*.test
+*.out
+vendor/

@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>numbat · record viewer</title>
+<style>
+  :root{
+    --bark:#171310; --soil:#1F1A16; --ridge:#2A231D; --lift:#352C25;
+    --line:rgba(237,230,218,.10); --line2:rgba(237,230,218,.18);
+    --band:#EDE6DA; --dim:#A29485; --dust:#7D7065;
+    --rufous:#C9552B; --verdigris:#4FA98D; --amber:#D8A24A; --violet:#8B7BB8;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+    --row:29px;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--bark);color:var(--band);font-family:var(--ui);font-size:13.5px;
+    display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased;
+  }
+  button,input,select{font-family:inherit}
+  ::-webkit-scrollbar{width:11px;height:11px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--ridge);border-radius:6px;border:3px solid var(--bark)}
+  ::-webkit-scrollbar-thumb:hover{background:var(--lift)}
+
+  .btn{
+    background:var(--ridge);border:1px solid var(--line);color:var(--band);
+    padding:6px 12px;border-radius:3px;font-size:12px;cursor:pointer;transition:.14s;white-space:nowrap;
+  }
+  .btn:hover:not(:disabled){background:var(--lift);border-color:var(--line2)}
+  .btn:disabled{opacity:.3;cursor:not-allowed}
+  .btn.primary{background:var(--band);color:var(--bark);border-color:var(--band);font-weight:600}
+  .btn.primary:hover{background:#fff}
+  .btn.on{background:var(--verdigris);border-color:var(--verdigris);color:#0E1A16;font-weight:600}
+  .btn:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--verdigris);outline-offset:1px}
+
+  .bar{
+    display:flex;align-items:center;gap:9px;padding:9px 14px;
+    border-bottom:1px solid var(--line);background:var(--soil);flex:0 0 auto;
+  }
+  .brand{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:10.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--dust);user-select:none}
+  .pelt{display:flex;gap:2px;align-items:flex-end;height:13px}
+  .pelt i{width:2.5px;border-radius:1px;background:var(--rufous)}
+  .pelt i:nth-child(2n){background:var(--band)}
+  #src{
+    background:var(--ridge);border:1px solid var(--line);color:var(--band);
+    padding:6px 9px;border-radius:3px;font-family:var(--mono);font-size:11.5px;max-width:230px;
+  }
+  .live{display:flex;align-items:center;gap:6px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--dust);flex:0 0 auto}
+  .dot.on{background:var(--verdigris);animation:pulse 1.9s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  .fileinfo{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--dust);text-align:right;line-height:1.45;max-width:36%;overflow:hidden}
+  .fileinfo b{color:var(--band);font-weight:500}
+  .fileinfo .warnbit{color:var(--amber)}
+
+  .land{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:40px;text-align:center;overflow:auto}
+  .land.hot{background:rgba(79,169,141,.06);outline:2px dashed var(--verdigris);outline-offset:-18px}
+  .land h1{font-size:26px;margin:0;letter-spacing:-.025em}
+  .land p{color:var(--dim);max-width:56ch;margin:0;line-height:1.65}
+  .paths{font-family:var(--mono);font-size:11.5px;text-align:left;line-height:2;border:1px solid var(--line);border-radius:3px;padding:14px 18px;background:var(--soil);max-width:100%;overflow:auto}
+  .paths span{color:var(--dust);margin-left:10px}
+  .paths em{color:var(--amber);font-style:normal}
+  kbd{font-family:var(--mono);font-size:10.5px;background:var(--ridge);border:1px solid var(--line2);border-bottom-width:2px;border-radius:3px;padding:1px 5px;color:var(--dim)}
+
+  .prog{position:fixed;inset:0;background:rgba(23,19,16,.95);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:50}
+  .prog .track{width:280px;height:2px;background:var(--ridge);border-radius:2px;overflow:hidden}
+  .prog .fill{height:100%;background:var(--verdigris);width:0%}
+  .prog .txt{font-family:var(--mono);font-size:11px;color:var(--dust);letter-spacing:.1em;text-align:center;line-height:1.8}
+
+  .head{background:var(--soil);border-bottom:1px solid var(--line);flex:0 0 auto}
+  .stats{display:flex;overflow-x:auto}
+  .stat{padding:9px 16px;border:0;border-right:1px solid var(--line);white-space:nowrap;cursor:pointer;transition:.14s;user-select:none;background:none;color:inherit;text-align:left}
+  .stat:hover{background:var(--ridge)}
+  .stat.on{background:var(--ridge);box-shadow:inset 0 -2px 0 var(--rufous)}
+  .stat.static,.stat.static:hover{cursor:default;background:transparent}
+  .stat b{display:block;font-family:var(--mono);font-size:16px;font-weight:500;line-height:1.35}
+  .stat i{font-family:var(--mono);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--dust);font-style:normal}
+  .s-hi b{color:var(--rufous)} .s-ok b{color:var(--verdigris)} .s-wa b{color:var(--amber)} .s-vi b{color:var(--violet)}
+
+  .tlwrap{position:relative;padding:6px 14px 8px;border-top:1px solid var(--line)}
+  #tl{display:block;width:100%;height:46px;cursor:crosshair;touch-action:none}
+  .tllabels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9.5px;color:var(--dust);margin-top:3px;gap:10px}
+  .tlclear{position:absolute;right:14px;top:6px;font-family:var(--mono);font-size:9.5px;color:var(--amber);background:var(--ridge);border:1px solid rgba(216,162,74,.4);padding:2px 8px;border-radius:2px;cursor:pointer}
+
+  .qbar{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--line);flex:0 0 auto;background:var(--bark)}
+  .qwrap{position:relative;flex:1;display:flex;align-items:center;min-width:0}
+  .qwrap svg{position:absolute;left:10px;pointer-events:none}
+  #q{
+    width:100%;background:var(--soil);border:1px solid var(--line);color:var(--band);
+    padding:8px 86px 8px 31px;border-radius:3px;font-family:var(--mono);font-size:12px;min-width:0;
+  }
+  #q:focus{outline:none;border-color:var(--line2);background:var(--ridge)}
+  #q::placeholder{color:var(--dust)}
+  .qhint{position:absolute;right:9px;font-family:var(--mono);font-size:9.5px;color:var(--dust);pointer-events:none}
+  .qhelp{font-family:var(--mono);font-size:10.5px;color:var(--dust);white-space:nowrap}
+  .qhelp b{color:var(--dim);font-weight:400}
+  .pills{display:flex;gap:6px;flex-wrap:wrap;padding:0 14px 8px;flex:0 0 auto;background:var(--bark)}
+  .pills:empty{display:none}
+  .pill{display:inline-flex;align-items:center;gap:7px;background:var(--ridge);border:1px solid var(--line2);border-radius:12px;padding:3px 6px 3px 11px;font-family:var(--mono);font-size:10.5px;color:var(--dim);max-width:100%}
+  .pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pill button{background:none;border:0;color:var(--dust);cursor:pointer;font-size:13px;line-height:1;padding:0 3px;flex:0 0 auto}
+  .pill button:hover{color:var(--rufous)}
+
+  .main{flex:1;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(320px,1fr);min-height:0}
+  .listwrap{position:relative;overflow-y:auto;overflow-x:hidden;border-right:1px solid var(--line)}
+  #spacer{position:relative;width:100%}
+  #rows{position:absolute;top:0;left:0;right:0;will-change:transform}
+  .row{height:var(--row);display:grid;grid-template-columns:66px 84px 78px minmax(0,1fr);gap:11px;align-items:center;padding:0 14px;cursor:pointer;font-family:var(--mono);font-size:11.5px;border-bottom:1px solid rgba(237,230,218,.045)}
+  .row:hover{background:rgba(237,230,218,.045)}
+  .row.sel{background:var(--ridge);box-shadow:inset 3px 0 0 var(--rufous)}
+  .row.fresh{animation:fresh 2.4s ease-out}
+  @keyframes fresh{0%{background:rgba(79,169,141,.22)}100%{background:transparent}}
+  .row .ts{color:var(--dust);font-size:10.5px}
+  .row .kd{font-size:9px;letter-spacing:.1em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis}
+  .row .ag{color:var(--dust);font-size:10px;overflow:hidden;text-overflow:ellipsis}
+  .row .bd{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+  .row .bd strong{font-weight:500;color:var(--band)}
+  .row mark{background:rgba(216,162,74,.3);color:var(--band);border-radius:2px}
+  .k-finding{color:var(--rufous)} .k-event{color:var(--dust)} .k-enforcement{color:var(--amber)}
+  .k-indicator{color:var(--verdigris)} .k-scan_summary{color:var(--violet)} .k-diagnostic{color:var(--dust)}
+  .k-unknown{color:var(--dust)}
+  .sv-high .bd strong,.sv-critical .bd strong{color:var(--rufous)}
+  .sv-medium .bd strong{color:var(--amber)}
+  .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--dust);font-family:var(--mono);font-size:11.5px;line-height:2;padding:20px;pointer-events:none}
+
+  .detail{overflow-y:auto;background:var(--soil)}
+  .dhead{padding:14px 16px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--soil);z-index:2}
+  .dhead h2{margin:0 0 6px;font-family:var(--mono);font-size:13px;font-weight:500;word-break:break-all}
+  .dmeta{display:flex;gap:6px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px}
+  .tag{background:var(--ridge);border:1px solid var(--line);border-radius:2px;padding:2px 7px;color:var(--dim);letter-spacing:.06em;word-break:break-all}
+  .tag.hi{color:var(--rufous);border-color:rgba(201,85,43,.45)}
+  .tag.wa{color:var(--amber);border-color:rgba(216,162,74,.4)}
+  .tag.ok{color:var(--verdigris);border-color:rgba(79,169,141,.4)}
+  .dbody{padding:14px 16px 44px}
+  .lbl{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--dust);margin:18px 0 8px}
+  .lbl:first-child{margin-top:0}
+  .lbl::after{content:"";flex:1;height:1px;background:var(--line)}
+  .note{border-left:2px solid var(--amber);background:rgba(216,162,74,.07);padding:10px 13px;font-size:12px;line-height:1.6;color:var(--dim);border-radius:0 2px 2px 0}
+  .note b{color:var(--band);font-weight:600}
+  .cmd{font-family:var(--mono);font-size:11.5px;line-height:1.7;background:var(--bark);border:1px solid var(--line);border-radius:3px;padding:12px;white-space:pre-wrap;word-break:break-word;color:var(--band);max-height:260px;overflow:auto}
+  .jump{display:block;width:100%;text-align:left;margin-bottom:5px;font-family:var(--mono);font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  pre.json{margin:0;font-family:var(--mono);font-size:11.5px;line-height:1.72;white-space:pre-wrap;word-break:break-word;background:var(--bark);border:1px solid var(--line);border-radius:3px;padding:13px;max-height:60vh;overflow:auto}
+  .jk{color:var(--verdigris)} .js{color:var(--band)} .jn{color:var(--amber)} .jb{color:var(--violet)}
+  .dactions{display:flex;gap:7px;margin-top:12px;flex-wrap:wrap}
+  .placeholder{padding:34px 20px;color:var(--dust);font-family:var(--mono);font-size:11.5px;line-height:2.1}
+  .placeholder b{color:var(--dim);font-weight:400}
+
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--band);color:var(--bark);padding:9px 18px;border-radius:3px;font-size:12.5px;font-weight:600;transition:transform .22s cubic-bezier(.2,.8,.3,1);z-index:60;pointer-events:none;max-width:80vw;text-align:center}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  .toast.err{background:var(--rufous);color:#fff}
+
+  @media (max-width:1100px){#src{max-width:150px}}
+  @media (max-width:960px){
+    .main{grid-template-columns:1fr;grid-template-rows:1fr 1fr}
+    .listwrap{border-right:0;border-bottom:1px solid var(--line)}
+    .qhelp,.fileinfo{display:none}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <span class="brand"><span class="pelt"><i style="height:6px"></i><i style="height:11px"></i><i style="height:13px"></i><i style="height:9px"></i><i style="height:12px"></i></span>record viewer</span>
+  <select id="src" hidden aria-label="Record source"></select>
+  <button class="btn" id="live" hidden title="Poll the file for new records"><span class="live"><span class="dot" id="dot"></span>Live</span></button>
+  <button class="btn primary" id="open" hidden>Open</button>
+  <button class="btn" id="reload" disabled title="Re-read from disk (r)">Reload</button>
+  <button class="btn" id="jq" disabled title="Copy an equivalent jq command">Copy jq</button>
+  <button class="btn" id="exp" disabled title="Export the current view as NDJSON">Export</button>
+  <div class="fileinfo" id="fileinfo"></div>
+</div>
+
+<div class="land" id="land">
+  <h1 id="landTitle">Connecting to the record stream…</h1>
+  <p id="landMsg">Looking for NDJSON files served from <code>~/.numbat</code>.</p>
+  <div class="paths" id="landPaths" hidden></div>
+  <div id="landActions" hidden><button class="btn primary" id="landOpen">Open a file manually</button></div>
+</div>
+
+<div class="head" id="head" hidden>
+  <div class="stats" id="stats"></div>
+  <div class="tlwrap">
+    <canvas id="tl"></canvas>
+    <div class="tllabels"><span id="tlA"></span><span id="tlB"></span></div>
+    <button class="tlclear" id="tlclear" hidden>clear range ✕</button>
+  </div>
+</div>
+
+<div class="qbar" id="qbar" hidden>
+  <div class="qwrap">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7D7065" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+    <input id="q" placeholder="search…   or   rule:chain sev:high -type:event" spellcheck="false" autocomplete="off" aria-label="Filter records">
+    <span class="qhint" id="qhint"></span>
+  </div>
+  <span class="qhelp"><b>/</b> search · <b>j/k</b> move · <b>r</b> reload · <b>esc</b> clear</span>
+</div>
+<div class="pills" id="pills"></div>
+
+<div class="main" id="main" hidden>
+  <div class="listwrap" id="listwrap">
+    <div id="spacer"><div id="rows"></div></div>
+    <div class="empty" id="empty" hidden></div>
+  </div>
+  <div class="detail" id="detail">
+    <div class="placeholder">
+      Select a record to inspect it.<br><br>
+      <b>Findings</b> resolve cited events into jump buttons.<br>
+      <b>Events</b> show the full command or tool payload.<br><br>
+      Query fields: <b>rule:</b> <b>sev:</b> <b>agent:</b> <b>type:</b> <b>session:</b> <b>event:</b> <b>id:</b><br>
+      Prefix with <b>-</b> to negate. Anything else is free text.
+    </div>
+  </div>
+</div>
+
+<div class="prog" id="prog" hidden>
+  <div class="txt" id="progTxt">parsing…</div>
+  <div class="track"><div class="fill" id="progFill"></div></div>
+  <button class="btn" id="progCancel">Cancel</button>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  var ROW = 29, OVER = 12, MAX_BYTES = 900*1024*1024;
+  var POLL_MS = 4000;
+  var DEFAULT_SOURCES = ["../records.ndjson","../findings.ndjson","../numbat-baseline.ndjson"];
+
+  var recs=[], view=[], sel=-1, handle=null, bad=0, eidx=null;
+  var range=null, kindFilter="", loadToken=0, loading=false, lastDesc=null;
+  var served = (location.protocol === "http:" || location.protocol === "https:");
+  var liveOn=false, liveTimer=null, lastSig="", freshFrom=-1, freshTimer=null;
+
+  function $(i){ return document.getElementById(i); }
+  var land=$("land"), head=$("head"), qbar=$("qbar"), main=$("main"), pills=$("pills");
+  var listwrap=$("listwrap"), spacer=$("spacer"), rowsEl=$("rows"), emptyEl=$("empty");
+  var detail=$("detail"), qEl=$("q"), qhint=$("qhint"), fileinfo=$("fileinfo");
+  var prog=$("prog"), progFill=$("progFill"), progTxt=$("progTxt");
+  var tl=$("tl"), tlctx=null, tlclear=$("tlclear"), srcSel=$("src");
+  try { tlctx = tl.getContext("2d"); } catch(e){ tlctx = null; }
+
+  /* ═════ boot ═════ */
+  function boot(){
+    if(served){
+      $("live").hidden = false;
+      discover();
+    } else {
+      $("open").hidden = false;
+      $("landTitle").textContent = "Drop a numbat record stream";
+      $("landMsg").innerHTML = "This page is open from a file path, so the browser will not let it read your log automatically. " +
+        "Run <code>nbview</code> to serve it over localhost and it will load on open.";
+      $("landPaths").hidden = false;
+      $("landPaths").innerHTML =
+        "~/.numbat/records.ndjson<span>live hook capture</span><br>" +
+        "~/.numbat/findings.ndjson<span>findings-only installs</span><br>" +
+        "~/numbat-baseline.ndjson<span>at-rest scan output</span>";
+      $("landActions").hidden = false;
+    }
+  }
+
+  function discover(){
+    // numbatd exposes a JSON source list; python http.server does not.
+    fetch("/api/sources", { cache:"no-store" }).then(function(r){
+      if(!r.ok) throw new Error("no api");
+      return r.json();
+    }).then(function(list){
+      if(!Array.isArray(list)) throw new Error("bad api payload");
+      var all = [];
+      for(var i=0;i<list.length;i++){
+        var x = list[i];
+        if(x && typeof x.url === "string" && typeof x.name === "string")
+          all.push({ url:x.url, size:(typeof x.size === "number" ? x.size : 0) });
+      }
+      if(!all.length){ noSources(); return; }
+      showSources(all);
+    }).catch(function(){ legacyDiscover(); });
+  }
+
+  function legacyDiscover(){
+    fetch("../", { cache:"no-store" }).then(function(r){
+      if(!r.ok) throw new Error("index " + r.status);
+      return r.text();
+    }).then(function(html){
+      var found = [], doc;
+      try {
+        doc = new DOMParser().parseFromString(html, "text/html");
+        var as = doc.querySelectorAll("a[href]");
+        for(var i=0;i<as.length;i++){
+          var href = as[i].getAttribute("href");
+          if(!href) continue;
+          if(/\.ndjson$|\.jsonl$/i.test(href)) found.push("../" + href.replace(/^\.?\//,""));
+        }
+      } catch(e){ /* fall through */ }
+      if(!found.length) found = DEFAULT_SOURCES.slice();
+      return probe(found);
+    }).catch(function(){
+      return probe(DEFAULT_SOURCES.slice());
+    });
+  }
+
+  function probe(urls){
+    var checks = urls.map(function(u){
+      return fetch(u, { method:"HEAD", cache:"no-store" })
+        .then(function(r){ return r.ok ? { url:u, size:+(r.headers.get("content-length")||0) } : null; })
+        .catch(function(){ return null; });
+    });
+    return Promise.all(checks).then(function(res){
+      var live = res.filter(function(x){ return x && x.size > 0; });
+      var empty = res.filter(function(x){ return x && x.size === 0; });
+      var all = live.concat(empty);
+      if(!all.length){ noSources(); return; }
+      showSources(all);
+    });
+  }
+
+  function showSources(all){
+    srcSel.hidden = false;
+    srcSel.innerHTML = all.map(function(x){
+      return '<option value="'+esc(x.url)+'">'+esc(base(x.url))+(x.size?"":"  (empty)")+'</option>';
+    }).join("");
+    srcSel.addEventListener("change", function(){ loadURL(srcSel.value, true); });
+    loadURL(all[0].url, true);
+  }
+
+  function noSources(){
+    $("landTitle").textContent = "No record files found";
+    $("landMsg").innerHTML = "The server is running but there are no <code>.ndjson</code> files in <code>~/.numbat</code> yet. " +
+      "Hooks write there once a new agent session runs.";
+    $("landPaths").hidden = false;
+    $("landPaths").innerHTML = "numbat hook status --agent claude<span>confirm hooks are wired</span><br>" +
+      "ls -lh ~/.numbat/<span>check for output</span>";
+    $("landActions").hidden = false;
+    $("open").hidden = false;
+  }
+  function base(u){ return String(u).replace(/^.*\//,""); }
+
+  /* ═════ load from URL ═════ */
+  function loadURL(url, resetState){
+    if(!url) return;
+    var token = ++loadToken;
+    loading = true;
+    prog.hidden = false; progFill.style.width = "0%";
+    progTxt.textContent = "fetching " + base(url);
+    fetch(url, { cache:"no-store" }).then(function(r){
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      lastSig = sigOf(r);
+      return r.text();
+    }).then(function(txt){
+      if(token !== loadToken) return;
+      chunkParse(txt, { name:base(url), size:txt.length, url:url }, token, resetState);
+    }).catch(function(err){
+      if(token !== loadToken) return;
+      loading = false; prog.hidden = true;
+      toast("Could not fetch " + base(url) + " — " + (err && err.message ? err.message : "request failed"), true);
+      if(!recs.length){ land.hidden = false; head.hidden = true; qbar.hidden = true; main.hidden = true; }
+    });
+  }
+  function sigOf(r){
+    return (r.headers.get("content-length")||"?") + "|" + (r.headers.get("last-modified")||"?") + "|" + (r.headers.get("etag")||"?");
+  }
+
+  /* ═════ live polling ═════ */
+  $("live").addEventListener("click", function(){
+    liveOn = !liveOn;
+    $("live").classList.toggle("on", liveOn);
+    $("dot").classList.toggle("on", liveOn);
+    if(liveTimer){ clearInterval(liveTimer); liveTimer = null; }
+    if(liveOn){
+      liveTimer = setInterval(pollSource, POLL_MS);
+      toast("Live — checking every " + (POLL_MS/1000) + "s");
+    } else toast("Live off");
+  });
+
+  function pollSource(){
+    if(!liveOn || loading || document.hidden) return;
+    var url = lastDesc && lastDesc.url;
+    if(!url) return;
+    fetch(url, { method:"HEAD", cache:"no-store" }).then(function(r){
+      if(!r.ok) return;
+      var sig = sigOf(r);
+      if(sig !== lastSig){
+        lastSig = sig;
+        var before = recs.length;
+        refreshKeepState(url, before);
+      }
+    }).catch(function(){});
+  }
+
+  function refreshKeepState(url, before){
+    var keepQ = qEl.value, keepK = kindFilter, keepR = range;
+    var keepTop = listwrap.scrollTop, keepSelRaw = (sel >= 0 && recs[sel]) ? recs[sel].raw : null;
+    var atBottom = (listwrap.scrollTop + listwrap.clientHeight) >= (spacer.offsetHeight - ROW*2);
+    var token = ++loadToken;
+    loading = true;
+    fetch(url, { cache:"no-store" }).then(function(r){
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      return r.text();
+    }).then(function(txt){
+      if(token !== loadToken) return;
+      chunkParse(txt, { name:base(url), size:txt.length, url:url }, token, false, function(){
+        qEl.value = keepQ; kindFilter = keepK; range = keepR;
+        tlclear.hidden = !range;
+        syncStats(); apply();
+        if(keepSelRaw){
+          for(var i=0;i<recs.length;i++) if(recs[i].raw === keepSelRaw){ sel = i; showDetail(recs[i]); break; }
+        }
+        var added = recs.length - before;
+        if(added > 0){
+          freshFrom = before;
+          if(freshTimer) clearTimeout(freshTimer);
+          freshTimer = setTimeout(function(){ freshFrom = -1; paint(); }, 2600);
+          toast("+" + added.toLocaleString() + " new record" + (added===1?"":"s"));
+          if(atBottom) listwrap.scrollTop = spacer.offsetHeight;
+          else listwrap.scrollTop = keepTop;
+        } else listwrap.scrollTop = keepTop;
+        paint();
+      });
+    }).catch(function(){ loading = false; prog.hidden = true; });
+  }
+
+  /* ═════ load from File ═════ */
+  function load(file){
+    if(!file){ toast("No file selected", true); return; }
+    if(typeof file.size === "number" && file.size > MAX_BYTES){
+      toast("File is " + fmtB(file.size) + " — too large for a browser. Prune it or pre-filter with jq.", true);
+      return;
+    }
+    if(typeof file.size === "number" && file.size === 0){ toast("That file is empty", true); return; }
+    var token = ++loadToken;
+    loading = true;
+    prog.hidden = false; progFill.style.width = "0%";
+    progTxt.textContent = "reading " + file.name;
+    var r = new FileReader();
+    r.onload = function(){
+      if(token !== loadToken) return;
+      if(typeof r.result !== "string"){ failLoad("Unreadable file contents"); return; }
+      chunkParse(r.result, { name:file.name, size:file.size, url:null }, token, true);
+    };
+    r.onerror = function(){ if(token === loadToken) failLoad("Could not read that file"); };
+    r.onabort  = function(){ if(token === loadToken) failLoad("Read cancelled"); };
+    try { r.readAsText(file); } catch(e){ failLoad("Read failed"); }
+  }
+  function failLoad(msg){ loading = false; prog.hidden = true; toast(msg, true); }
+
+  /* ═════ parse ═════ */
+  function chunkParse(text, desc, token, resetState, after){
+    var lines = text.split("\n"), n = lines.length, i = 0, CHUNK = 12000;
+    var next = [], nBad = 0;
+    function step(){
+      if(token !== loadToken){ loading = false; prog.hidden = true; return; }
+      var end = Math.min(n, i + CHUNK);
+      for(; i < end; i++){
+        var ln = lines[i];
+        if(!ln) continue;
+        var t = ln.trim();
+        if(!t) continue;
+        var o;
+        try { o = JSON.parse(t); } catch(e){ nBad++; continue; }
+        if(o === null || typeof o !== "object" || Array.isArray(o)){ nBad++; continue; }
+        next.push(mkRec(o, t, next.length));
+      }
+      progFill.style.width = (n ? (i/n*100) : 100).toFixed(1) + "%";
+      progTxt.textContent = "parsing · " + next.length.toLocaleString() + " records";
+      if(i < n) requestAnimationFrame(step);
+      else finish(desc, next, nBad, token, resetState, after);
+    }
+    requestAnimationFrame(step);
+  }
+
+  function s(v){ return (v === undefined || v === null) ? "" : String(v); }
+
+  function mkRec(o, raw, idx){
+    var t = s(o.timestamp) || s(o.detected_at) || s(o.last_seen) || "";
+    var ms = 0;
+    if(t){ var p = Date.parse(t); if(!isNaN(p)) ms = p; }
+    return {
+      rt: s(o.record_type) || "unknown", ts:t, tms:ms,
+      sev: s(o.severity), rule: s(o.rule_id) || s(o.deny_rule_id),
+      agent: s(o.source_agent), etype: s(o.event_type),
+      sid: s(o.session_id), eid: s(o.event_id),
+      body: bodyOf(o), raw: raw, low: raw.toLowerCase(), o:o, i:idx
+    };
+  }
+
+  function bodyOf(o){
+    var rt = s(o.record_type);
+    if(rt === "finding")      return s(o.rule_id) + " · " + s(o.title);
+    if(rt === "event")        return s(o.event_type) + " · " + (s(o.tool_name)||s(o.observed_command)||s(o.content_preview)||s(o.url)||s(o.file_path));
+    if(rt === "enforcement")  return s(o.decision) + " · " + (s(o.deny_rule_id)||s(o.reason));
+    if(rt === "indicator")    return s(o.type) + " · " + s(o.value) + " ×" + (o.count == null ? 1 : o.count);
+    if(rt === "scan_summary") return "status · " + s(o.status);
+    if(rt === "diagnostic")   return s(o.level) + " · " + s(o.message);
+    return s(o.title) || s(o.message) || s(o.rule_id) || "(no summary field)";
+  }
+
+  function finish(desc, parsed, nBad, token, resetState, after){
+    if(token !== loadToken){ loading = false; prog.hidden = true; return; }
+    loading = false;
+    recs = parsed; bad = nBad; eidx = null; lastDesc = desc;
+    if(resetState){ range = null; kindFilter = ""; sel = -1; tlclear.hidden = true;
+      detail.innerHTML = '<div class="placeholder">Select a record to inspect it.</div>'; }
+    prog.hidden = true;
+
+    if(!recs.length){
+      land.hidden = false; head.hidden = true; qbar.hidden = true; main.hidden = true;
+      $("jq").disabled = true; $("exp").disabled = true;
+      $("landTitle").textContent = "No records yet";
+      $("landMsg").textContent = desc.name + " has no usable records" + (nBad ? " (" + nBad + " unparsed lines)" : "") + ".";
+      $("landActions").hidden = false;
+      fileinfo.innerHTML = "<b>"+esc(desc.name)+"</b><br><span class='warnbit'>0 records</span>";
+      return;
+    }
+
+    land.hidden = true; head.hidden = false; qbar.hidden = false; main.hidden = false;
+    fileinfo.innerHTML = "<b>"+esc(desc.name)+"</b><br>"+fmtB(desc.size)+" · "+recs.length.toLocaleString()+" records"+
+      (bad ? " · <span class='warnbit'>"+bad+" unparsed</span>" : "");
+    $("jq").disabled = false; $("exp").disabled = false;
+    buildStats();
+    if(after) after(); else apply();
+    if(bad && resetState) toast(bad.toLocaleString()+" line"+(bad===1?"":"s")+" failed to parse — skipped");
+  }
+
+  $("progCancel").addEventListener("click", function(){
+    loadToken++; loading = false; prog.hidden = true; toast("Load cancelled");
+  });
+
+  /* ═════ stats ═════ */
+  function buildStats(){
+    var k=Object.create(null), sv=Object.create(null), sess=Object.create(null), nSess=0, i;
+    for(i=0;i<recs.length;i++){
+      var r=recs[i];
+      k[r.rt]=(k[r.rt]||0)+1;
+      if(r.rt==="finding"&&r.sev) sv[r.sev]=(sv[r.sev]||0)+1;
+      if(r.sid&&!sess[r.sid]){ sess[r.sid]=1; nSess++; }
+    }
+    var h=st("",recs.length,"records","static");
+    var order=["event","finding","enforcement","indicator","scan_summary","diagnostic"], seen=Object.create(null);
+    order.forEach(function(t){ seen[t]=1;
+      if(k[t]) h+=st(t,k[t],label(t,k[t]),t==="finding"?"s-hi":t==="enforcement"?"s-wa":t==="indicator"?"s-ok":t==="scan_summary"?"s-vi":"");
+    });
+    Object.keys(k).forEach(function(t){ if(!seen[t]) h+=st(t,k[t],label(t,k[t]),""); });
+    var hi=(sv.high||0)+(sv.critical||0);
+    h+=st("__hi",hi,"high sev",hi?"s-hi":"s-ok");
+    h+=st("",nSess,"sessions","s-vi static");
+    $("stats").innerHTML=h;
+    var kids=$("stats").children;
+    for(i=0;i<kids.length;i++){
+      (function(el){
+        var f=el.getAttribute("data-f"); if(!f) return;
+        el.addEventListener("click",function(){ kindFilter=(kindFilter===f)?"":f; syncStats(); apply(); });
+      })(kids[i]);
+    }
+    syncStats();
+  }
+  function label(t,n){
+    if(t==="diagnostic") return "diagnostics";
+    if(t==="scan_summary") return "summaries";
+    return t+(n===1?"":"s");
+  }
+  function st(f,v,l,cls){
+    var tn=f?"button":"div";
+    return "<"+tn+' class="stat '+(cls||"")+'"'+(f?' data-f="'+esc(f)+'" type="button"':'')+'><b>'+v.toLocaleString()+'</b><i>'+esc(l)+'</i></'+tn+'>';
+  }
+  function syncStats(){
+    var kids=$("stats").children;
+    for(var i=0;i<kids.length;i++)
+      if(kids[i].classList) kids[i].classList.toggle("on", !!kindFilter && kids[i].getAttribute("data-f")===kindFilter);
+  }
+
+  /* ═════ query ═════ */
+  var FIELDS={rule:"rule",sev:"sev",severity:"sev",agent:"agent",type:"rt",kind:"rt",event:"etype",session:"sid",id:"eid"};
+  function parseQ(str){
+    var terms=[],free=[],neg=[],negTerms=[];
+    var toks=s(str).match(/\S+/g)||[];
+    for(var i=0;i<toks.length;i++){
+      var tok=toks[i],isNeg=false;
+      if(tok.charAt(0)==="-"&&tok.length>1){ isNeg=true; tok=tok.slice(1); }
+      var m=tok.match(/^([A-Za-z]+):(.+)$/);
+      if(m&&FIELDS[m[1].toLowerCase()]) (isNeg?negTerms:terms).push({f:FIELDS[m[1].toLowerCase()],v:m[2].toLowerCase(),k:m[1].toLowerCase()});
+      else if(tok) (isNeg?neg:free).push(tok.toLowerCase());
+    }
+    return {terms:terms,free:free,negTerms:negTerms,neg:neg};
+  }
+
+  function apply(){
+    var q=parseQ(qEl.value), out=[], j;
+    for(var i=0;i<recs.length;i++){
+      var r=recs[i], ok=true;
+      if(kindFilter==="__hi"){ if(r.sev!=="high"&&r.sev!=="critical") ok=false; }
+      else if(kindFilter&&r.rt!==kindFilter) ok=false;
+      if(ok&&range){ if(!r.tms||r.tms<range[0]||r.tms>range[1]) ok=false; }
+      if(ok) for(j=0;j<q.terms.length;j++) if(r[q.terms[j].f].toLowerCase().indexOf(q.terms[j].v)===-1){ok=false;break;}
+      if(ok) for(j=0;j<q.negTerms.length;j++) if(r[q.negTerms[j].f].toLowerCase().indexOf(q.negTerms[j].v)!==-1){ok=false;break;}
+      if(ok) for(j=0;j<q.free.length;j++) if(r.low.indexOf(q.free[j])===-1){ok=false;break;}
+      if(ok) for(j=0;j<q.neg.length;j++) if(r.low.indexOf(q.neg[j])!==-1){ok=false;break;}
+      if(ok) out.push(i);
+    }
+    view=out;
+    qhint.textContent=view.length.toLocaleString()+" / "+recs.length.toLocaleString();
+    renderPills(q);
+    spacer.style.height=(view.length*ROW)+"px";
+    paint();
+    emptyEl.hidden = view.length>0;
+    if(!view.length) emptyEl.innerHTML="No records match these filters.<br>Press <kbd>esc</kbd> to clear.";
+    drawTL();
+  }
+
+  function renderPills(q){
+    var h="";
+    if(kindFilter) h+=pill("filter",kindFilter==="__hi"?"high severity":kindFilter,"kind");
+    if(range) h+=pill("range",fmtT(range[0])+" → "+fmtT(range[1]),"range");
+    q.terms.forEach(function(t){ h+=pill(t.k,t.v,"text"); });
+    q.negTerms.forEach(function(t){ h+=pill("not "+t.k,t.v,"text"); });
+    q.free.forEach(function(f){ h+=pill("text",f,"text"); });
+    q.neg.forEach(function(f){ h+=pill("not text",f,"text"); });
+    pills.innerHTML=h;
+    var bs=pills.querySelectorAll("button");
+    for(var i=0;i<bs.length;i++){
+      (function(b){
+        b.addEventListener("click",function(){
+          var w=b.getAttribute("data-w");
+          if(w==="kind"){ kindFilter=""; syncStats(); }
+          else if(w==="range"){ range=null; tlclear.hidden=true; }
+          else qEl.value="";
+          apply();
+        });
+      })(bs[i]);
+    }
+  }
+  function pill(k,v,w){
+    return '<span class="pill"><span>'+esc(k)+': '+esc(v)+'</span><button type="button" data-w="'+esc(w)+'" title="remove" aria-label="Remove filter">×</button></span>';
+  }
+
+  var qt=null;
+  qEl.addEventListener("input",function(){
+    if(qt) clearTimeout(qt);
+    qt=setTimeout(function(){ qt=null; listwrap.scrollTop=0; apply(); },130);
+  });
+
+  /* ═════ list ═════ */
+  var painting=false;
+  function paint(){
+    var vis=Math.ceil(listwrap.clientHeight/ROW)||1;
+    var start=Math.max(0,Math.floor(listwrap.scrollTop/ROW)-OVER);
+    var end=Math.min(view.length,start+vis+OVER*2);
+    var hl=firstFree(), h="";
+    for(var i=start;i<end;i++){
+      var r=recs[view[i]];
+      if(r) h+=rowHTML(r,hl);
+    }
+    rowsEl.style.transform="translateY("+(start*ROW)+"px)";
+    rowsEl.innerHTML=h;
+  }
+  function firstFree(){
+    var q=parseQ(qEl.value);
+    for(var i=0;i<q.free.length;i++) if(q.free[i].length>1) return q.free[i];
+    return "";
+  }
+  listwrap.addEventListener("scroll",function(){
+    if(painting) return;
+    painting=true;
+    requestAnimationFrame(function(){ painting=false; paint(); });
+  },{passive:true});
+  var rz=null;
+  window.addEventListener("resize",function(){
+    if(rz) clearTimeout(rz);
+    rz=setTimeout(function(){ rz=null; paint(); drawTL(); },80);
+  });
+
+  function rowHTML(r,hl){
+    var body=esc(trunc(r.body,170));
+    if(hl) body=mark(body,hl);
+    var d=body.indexOf(" · ");
+    if(d>-1) body="<strong>"+body.slice(0,d)+"</strong>"+body.slice(d);
+    var isFresh = freshFrom>=0 && r.i>=freshFrom;
+    return '<div class="row'+(r.i===sel?" sel":"")+(isFresh?" fresh":"")+(r.sev?" sv-"+esc(r.sev):"")+'" data-i="'+r.i+'">'+
+      '<span class="ts">'+(r.ts?esc(r.ts.slice(11,19)):"—")+'</span>'+
+      '<span class="kd k-'+esc(r.rt)+'">'+esc(r.rt)+'</span>'+
+      '<span class="ag">'+esc(r.agent||"—")+'</span>'+
+      '<span class="bd">'+body+'</span></div>';
+  }
+  function mark(html,term){
+    try { return html.replace(new RegExp("("+term.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+")","ig"),"<mark>$1</mark>"); }
+    catch(e){ return html; }
+  }
+
+  listwrap.addEventListener("click",function(e){
+    var t=e.target,row=null;
+    while(t&&t!==listwrap){ if(t.classList&&t.classList.contains("row")){ row=t; break; } t=t.parentNode; }
+    if(row){ var n=parseInt(row.getAttribute("data-i"),10); if(!isNaN(n)) select(n); }
+  });
+
+  function select(i){
+    if(i<0||i>=recs.length) return;
+    sel=i;
+    var kids=rowsEl.children;
+    for(var c=0;c<kids.length;c++) kids[c].classList.toggle("sel",parseInt(kids[c].getAttribute("data-i"),10)===i);
+    showDetail(recs[i]);
+  }
+  function move(d){
+    if(!view.length) return;
+    var pos=view.indexOf(sel);
+    if(pos===-1) pos=(d>0)?-1:view.length;
+    var np=Math.max(0,Math.min(view.length-1,pos+d));
+    select(view[np]);
+    var y=np*ROW;
+    if(y<listwrap.scrollTop) listwrap.scrollTop=y;
+    else if(y+ROW>listwrap.scrollTop+listwrap.clientHeight) listwrap.scrollTop=y+ROW-listwrap.clientHeight;
+    paint();
+  }
+
+  /* ═════ detail ═════ */
+  function showDetail(r){
+    if(!r) return;
+    var o=r.o,h="";
+    h+='<div class="dhead"><h2>'+esc(r.rule||r.etype||r.rt)+'</h2><div class="dmeta">';
+    h+=tag(r.rt,r.rt==="finding"?"hi":r.rt==="indicator"?"ok":"");
+    if(r.sev) h+=tag(r.sev,(r.sev==="high"||r.sev==="critical")?"hi":r.sev==="medium"?"wa":"");
+    if(o.confidence) h+=tag("conf "+s(o.confidence),"");
+    if(r.agent) h+=tag(r.agent,"");
+    if(o.source_type) h+=tag(s(o.source_type),"");
+    if(r.ts) h+=tag(r.ts.replace("T"," ").slice(0,19),"");
+    h+='</div></div><div class="dbody">';
+    if(o.title) h+='<span class="lbl">title</span><div style="font-size:13.5px;line-height:1.55">'+esc(s(o.title))+'</div>';
+    if(o.description) h+='<span class="lbl">description</span><div style="font-size:12.5px;line-height:1.6;color:var(--dim)">'+esc(s(o.description))+'</div>';
+    if(r.rt==="finding") h+='<span class="lbl">interpretation</span><div class="note">A finding is a <b>rule match</b>, not a confirmed incident. Pre-action hook records describe a <b>proposed</b> action — this does not prove it executed. <b>confidence</b> is parser certainty, not likelihood of malice.</div>';
+    var cmd=s(o.observed_command)||s(o.content_preview)||s(o.url)||s(o.file_path)||s(o.observed_file_path)||s(o.message);
+    if(cmd) h+='<span class="lbl">observed</span><div class="cmd">'+esc(cmd)+'</div>';
+    if(Array.isArray(o.cited_event_ids)&&o.cited_event_ids.length){
+      h+='<span class="lbl">cited events · '+o.cited_event_ids.length+'</span>';
+      for(var c=0;c<o.cited_event_ids.length;c++){
+        var id=s(o.cited_event_ids[c]),t=findEid(id);
+        h+='<button type="button" class="btn jump" data-t="'+(t>=0?t:"")+'"'+
+           (t<0?' disabled title="Not in this file — recapture with --emit all"':'')+'>'+
+           (t>=0?"→ ":"✕ ")+esc(id)+'</button>';
+      }
+    }
+    if(Array.isArray(o.tags)&&o.tags.length){
+      h+='<span class="lbl">tags</span><div class="dmeta">';
+      for(var g=0;g<o.tags.length;g++) h+=tag(s(o.tags[g]),"");
+      h+='</div>';
+    }
+    if(r.sid) h+='<span class="lbl">session</span><button type="button" class="btn jump" id="sessBtn">⧉ isolate '+esc(r.sid)+'</button>';
+    h+='<span class="lbl">full record</span><pre class="json">'+hilite(o)+'</pre>';
+    h+='<div class="dactions"><button type="button" class="btn" id="cpJson">Copy JSON</button><button type="button" class="btn" id="cpLine">Copy raw line</button></div></div>';
+    detail.innerHTML=h; detail.scrollTop=0;
+    var jumps=detail.querySelectorAll(".jump[data-t]");
+    for(var j=0;j<jumps.length;j++){
+      (function(b){ b.addEventListener("click",function(){
+        var t=b.getAttribute("data-t");
+        if(t!==""&&t!==null) jumpTo(parseInt(t,10));
+      }); })(jumps[j]);
+    }
+    var sb=$("sessBtn");
+    if(sb) sb.addEventListener("click",function(){ qEl.value="session:"+r.sid; kindFilter=""; syncStats(); listwrap.scrollTop=0; apply(); });
+    var cj=$("cpJson"),cl=$("cpLine");
+    if(cj) cj.addEventListener("click",function(){ copy(safeStr(o),"JSON copied"); });
+    if(cl) cl.addEventListener("click",function(){ copy(r.raw,"Raw line copied"); });
+  }
+  function tag(t,c){ return '<span class="tag '+c+'">'+esc(t)+'</span>'; }
+  function safeStr(o){ try{ return JSON.stringify(o,null,2); }catch(e){ return "[unserializable record]"; } }
+  function hilite(o){
+    var raw=safeStr(o);
+    if(raw.length>400000) return esc(raw.slice(0,400000))+"\n\n… truncated for display";
+    return esc(raw)
+      .replace(/&quot;([^&\n]*?)&quot;(\s*:)/g,'<span class="jk">&quot;$1&quot;</span>$2')
+      .replace(/:\s*&quot;([\s\S]*?)&quot;(,?)$/gm,': <span class="js">&quot;$1&quot;</span>$2')
+      .replace(/:\s*(-?\d+\.?\d*(?:[eE][+-]?\d+)?)(,?)$/gm,': <span class="jn">$1</span>$2')
+      .replace(/:\s*(true|false|null)(,?)$/gm,': <span class="jb">$1</span>$2');
+  }
+  function findEid(id){
+    if(!id) return -1;
+    if(!eidx){ eidx=Object.create(null); for(var i=0;i<recs.length;i++) if(recs[i].eid) eidx[recs[i].eid]=recs[i].i; }
+    return (id in eidx)?eidx[id]:-1;
+  }
+  function jumpTo(i){
+    if(isNaN(i)||i<0||i>=recs.length){ toast("Target record not found",true); return; }
+    if(view.indexOf(i)===-1){ qEl.value=""; kindFilter=""; range=null; tlclear.hidden=true; syncStats(); apply(); }
+    var pos=view.indexOf(i);
+    if(pos===-1){ toast("Record is filtered out",true); return; }
+    select(i);
+    listwrap.scrollTop=Math.max(0,pos*ROW-Math.floor(listwrap.clientHeight/2));
+    paint();
+  }
+
+  /* ═════ timeline ═════ */
+  var tlMin=0,tlMax=0,drag=null,hasTimes=false;
+  function drawTL(){
+    if(!tlctx) return;
+    var w=Math.floor(tl.clientWidth),hgt=46,i;
+    if(!w||w<10) return;
+    var dpr=window.devicePixelRatio||1;
+    tl.width=Math.floor(w*dpr); tl.height=Math.floor(hgt*dpr);
+    tlctx.setTransform(dpr,0,0,dpr,0,0);
+    tlctx.clearRect(0,0,w,hgt);
+    var idx=[];
+    for(i=0;i<recs.length;i++) if(recs[i].tms) idx.push(i);
+    hasTimes=idx.length>0;
+    if(!hasTimes){ $("tlA").textContent="no timestamps in this file"; $("tlB").textContent=""; return; }
+    tlMin=Infinity; tlMax=-Infinity;
+    for(i=0;i<idx.length;i++){ var t=recs[idx[i]].tms; if(t<tlMin)tlMin=t; if(t>tlMax)tlMax=t; }
+    if(!isFinite(tlMin)||!isFinite(tlMax)){ hasTimes=false; return; }
+    if(tlMax<=tlMin) tlMax=tlMin+1000;
+    var span=tlMax-tlMin;
+    var B=Math.max(30,Math.min(900,Math.floor(w/3)));
+    var all=new Array(B),fnd=new Array(B);
+    for(i=0;i<B;i++){ all[i]=0; fnd[i]=0; }
+    var inView=Object.create(null);
+    for(i=0;i<view.length;i++) inView[view[i]]=1;
+    for(i=0;i<idx.length;i++){
+      var r=recs[idx[i]];
+      if(!inView[r.i]) continue;
+      var b=Math.floor((r.tms-tlMin)/span*B);
+      if(b<0)b=0; if(b>=B)b=B-1;
+      all[b]++;
+      if(r.rt==="finding") fnd[b]++;
+    }
+    var peak=1;
+    for(i=0;i<B;i++) if(all[i]>peak) peak=all[i];
+    var bw=w/B;
+    for(i=0;i<B;i++){
+      if(all[i]){
+        var hh=Math.max(1.5,all[i]/peak*(hgt-8));
+        tlctx.fillStyle="rgba(125,112,101,.55)";
+        tlctx.fillRect(i*bw,hgt-hh,Math.max(1,bw-0.7),hh);
+      }
+      if(fnd[i]){
+        var fh=Math.max(2.5,fnd[i]/peak*(hgt-8));
+        tlctx.fillStyle="#C9552B";
+        tlctx.fillRect(i*bw,hgt-fh,Math.max(1,bw-0.7),fh);
+      }
+    }
+    if(range){
+      var x1=(range[0]-tlMin)/span*w,x2=(range[1]-tlMin)/span*w;
+      x1=Math.max(0,Math.min(w,x1)); x2=Math.max(0,Math.min(w,x2));
+      tlctx.fillStyle="rgba(79,169,141,.14)";
+      tlctx.fillRect(x1,0,Math.max(1,x2-x1),hgt);
+      tlctx.strokeStyle="#4FA98D"; tlctx.lineWidth=1;
+      tlctx.strokeRect(x1+.5,.5,Math.max(0,x2-x1-1),hgt-1);
+    }
+    $("tlA").textContent=fmtT(tlMin);
+    $("tlB").textContent=fmtT(tlMax);
+  }
+  function tlX(e){
+    var b=tl.getBoundingClientRect();
+    if(!b.width) return 0;
+    var cx=(e.touches&&e.touches[0])?e.touches[0].clientX:e.clientX;
+    return Math.max(0,Math.min(1,(cx-b.left)/b.width));
+  }
+  function dragStart(e){ if(!hasTimes||main.hidden) return; e.preventDefault(); var x=tlX(e); drag=[x,x]; }
+  function dragMove(e){
+    if(!drag) return;
+    drag[1]=tlX(e);
+    var a=Math.min(drag[0],drag[1]),b=Math.max(drag[0],drag[1]),sp=tlMax-tlMin;
+    range=[tlMin+a*sp,tlMin+b*sp];
+    drawTL();
+  }
+  function dragEnd(){
+    if(!drag) return;
+    var w=Math.abs(drag[1]-drag[0]);
+    drag=null;
+    if(w<0.006){ range=null; tlclear.hidden=true; } else tlclear.hidden=false;
+    listwrap.scrollTop=0; apply();
+  }
+  tl.addEventListener("mousedown",dragStart);
+  window.addEventListener("mousemove",dragMove);
+  window.addEventListener("mouseup",dragEnd);
+  tl.addEventListener("touchstart",dragStart,{passive:false});
+  window.addEventListener("touchmove",dragMove,{passive:true});
+  window.addEventListener("touchend",dragEnd);
+  window.addEventListener("blur",dragEnd);
+  tlclear.addEventListener("click",function(){ range=null; tlclear.hidden=true; apply(); });
+
+  /* ═════ open / reload ═════ */
+  function openFile(){
+    if(window.showOpenFilePicker){
+      window.showOpenFilePicker({
+        types:[{description:"NDJSON record stream",accept:{"application/x-ndjson":[".ndjson",".jsonl",".json",".log",".txt"]}}],
+        multiple:false
+      }).then(function(hs){
+        if(!hs||!hs.length) return null;
+        handle=hs[0]; $("reload").disabled=false;
+        return handle.getFile();
+      }).then(function(f){ if(f) load(f); })
+        .catch(function(err){ if(err&&err.name!=="AbortError") toast("Could not open that file",true); });
+    } else {
+      var inp=document.createElement("input");
+      inp.type="file";
+      inp.accept=".ndjson,.jsonl,.json,.log,.txt,application/x-ndjson,application/json,text/plain";
+      inp.addEventListener("change",function(){ if(inp.files&&inp.files[0]) load(inp.files[0]); });
+      inp.click();
+    }
+  }
+  $("open").addEventListener("click",openFile);
+  $("landOpen").addEventListener("click",openFile);
+
+  $("reload").addEventListener("click",doReload);
+  function doReload(){
+    if(lastDesc&&lastDesc.url){ refreshKeepState(lastDesc.url,recs.length); return; }
+    if(!handle){ toast("Open a file first, or run nbview to serve it over localhost"); return; }
+    var keepQ=qEl.value,keepK=kindFilter;
+    handle.getFile().then(function(f){
+      load(f);
+      var tries=0;
+      var iv=setInterval(function(){
+        tries++;
+        if(!loading||tries>150){ clearInterval(iv); if(recs.length){ qEl.value=keepQ; kindFilter=keepK; syncStats(); apply(); } }
+      },60);
+    }).catch(function(){
+      toast("Reload failed — the file may have moved",true);
+      handle=null; $("reload").disabled=true;
+    });
+  }
+
+  ["dragenter","dragover"].forEach(function(ev){
+    window.addEventListener(ev,function(e){ e.preventDefault(); if(e.dataTransfer) e.dataTransfer.dropEffect="copy"; if(!land.hidden) land.classList.add("hot"); });
+  });
+  ["dragleave","dragend"].forEach(function(ev){
+    window.addEventListener(ev,function(e){ e.preventDefault(); land.classList.remove("hot"); });
+  });
+  window.addEventListener("drop",function(e){
+    e.preventDefault(); land.classList.remove("hot");
+    var dt=e.dataTransfer;
+    if(dt&&dt.files&&dt.files[0]){ handle=null; $("reload").disabled=false; load(dt.files[0]); }
+  });
+
+  /* ═════ export / jq ═════ */
+  $("exp").addEventListener("click",function(){
+    if(!view.length){ toast("Nothing to export",true); return; }
+    try{
+      var parts=[];
+      for(var i=0;i<view.length;i++) parts.push(recs[view[i]].raw);
+      var url=URL.createObjectURL(new Blob([parts.join("\n")+"\n"],{type:"application/x-ndjson"}));
+      var a=document.createElement("a");
+      a.href=url; a.download="numbat-filtered-"+stamp()+".ndjson";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(url); },1500);
+      toast(view.length.toLocaleString()+" records exported");
+    }catch(e){ toast("Export failed",true); }
+  });
+
+  $("jq").addEventListener("click",function(){
+    var q=parseQ(qEl.value),c=[];
+    var MAP={rule:"rule_id",sev:"severity",agent:"source_agent",rt:"record_type",etype:"event_type",sid:"session_id",eid:"event_id"};
+    if(kindFilter==="__hi") c.push('(.severity=="high" or .severity=="critical")');
+    else if(kindFilter) c.push('(.record_type=="'+jqs(kindFilter)+'")');
+    q.terms.forEach(function(t){ c.push('(((.'+MAP[t.f]+' // "")|ascii_downcase)|contains("'+jqs(t.v)+'"))'); });
+    q.negTerms.forEach(function(t){ c.push('((((.'+MAP[t.f]+' // "")|ascii_downcase)|contains("'+jqs(t.v)+'"))|not)'); });
+    q.free.forEach(function(f){ c.push('((tostring|ascii_downcase)|contains("'+jqs(f)+'"))'); });
+    q.neg.forEach(function(f){ c.push('(((tostring|ascii_downcase)|contains("'+jqs(f)+'"))|not)'); });
+    if(range){
+      c.push('((.timestamp // .detected_at // "") >= "'+new Date(range[0]).toISOString()+'")');
+      c.push('((.timestamp // .detected_at // "") <= "'+new Date(range[1]).toISOString()+'")');
+    }
+    var filt=c.length?"select("+c.join(" and ")+")":".";
+    var name=lastDesc&&lastDesc.name?lastDesc.name:"records.ndjson";
+    copy("jq -c '"+filt+"' ~/.numbat/"+shq(name),"jq command copied");
+  });
+  function jqs(v){ return String(v).replace(/\\/g,"\\\\").replace(/"/g,'\\"'); }
+  function shq(v){ return /^[A-Za-z0-9._\-]+$/.test(v)?v:"'"+String(v).replace(/'/g,"'\\''")+"'"; }
+
+  /* ═════ keys ═════ */
+  document.addEventListener("keydown",function(e){
+    if(e.metaKey||e.ctrlKey||e.altKey) return;
+    var ae=document.activeElement;
+    var typing=ae&&(ae===qEl||ae.tagName==="INPUT"||ae.tagName==="TEXTAREA"||ae.tagName==="SELECT"||ae.isContentEditable);
+    if(e.key==="Escape"){
+      if(typing&&ae.blur) ae.blur();
+      if(main.hidden) return;
+      qEl.value=""; kindFilter=""; range=null; tlclear.hidden=true; syncStats(); listwrap.scrollTop=0; apply();
+      return;
+    }
+    if(typing) return;
+    if(main.hidden&&e.key!=="o") return;
+    if(e.key==="/"){ e.preventDefault(); qEl.focus(); qEl.select(); return; }
+    if(e.key==="j"||e.key==="ArrowDown"){ e.preventDefault(); move(1); return; }
+    if(e.key==="k"||e.key==="ArrowUp"){ e.preventDefault(); move(-1); return; }
+    if(e.key==="r"){ e.preventDefault(); doReload(); return; }
+    if(e.key==="l"){ e.preventDefault(); $("live").click(); return; }
+    if(e.key==="o"){ e.preventDefault(); openFile(); return; }
+    if(e.key==="g"){ listwrap.scrollTop=0; paint(); return; }
+    if(e.key==="G"){ listwrap.scrollTop=Math.max(0,view.length*ROW); paint(); return; }
+  });
+
+  /* ═════ utils ═════ */
+  function esc(v){
+    return String(v===undefined||v===null?"":v)
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+      .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+  }
+  function trunc(v,n){
+    var str=String(v===undefined||v===null?"":v).replace(/\s+/g," ");
+    return str.length>n?str.slice(0,n)+"…":str;
+  }
+  function fmtB(b){
+    if(typeof b!=="number"||isNaN(b)) return "";
+    if(b<1024) return b+" B";
+    if(b<1048576) return (b/1024).toFixed(1)+" KB";
+    if(b<1073741824) return (b/1048576).toFixed(1)+" MB";
+    return (b/1073741824).toFixed(2)+" GB";
+  }
+  function fmtT(ms){ try{ return new Date(ms).toLocaleString(); }catch(e){ return String(ms); } }
+  function stamp(){
+    var d=new Date(),p=function(n){ return (n<10?"0":"")+n; };
+    return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes());
+  }
+  var tt=null;
+  function toast(m,isErr){
+    var el=$("toast");
+    el.textContent=m;
+    el.classList.toggle("err",!!isErr);
+    el.classList.add("show");
+    if(tt) clearTimeout(tt);
+    tt=setTimeout(function(){ tt=null; el.classList.remove("show"); },isErr?4200:2100);
+  }
+  function copy(text,msg){
+    if(navigator.clipboard&&navigator.clipboard.writeText)
+      navigator.clipboard.writeText(text).then(function(){ toast(msg); },function(){ fb(text,msg); });
+    else fb(text,msg);
+  }
+  function fb(text,msg){
+    try{
+      var ta=document.createElement("textarea");
+      ta.value=text; ta.setAttribute("readonly","");
+      ta.style.position="fixed"; ta.style.top="0"; ta.style.opacity="0";
+      document.body.appendChild(ta);
+      ta.select(); ta.setSelectionRange(0,text.length);
+      var ok=document.execCommand("copy");
+      document.body.removeChild(ta);
+      toast(ok?msg:"Copy blocked — select the text manually",!ok);
+    }catch(e){ toast("Copy failed",true); }
+  }
+
+  window.addEventListener("error",function(e){ toast("Unexpected error: "+(e&&e.message?e.message:"unknown"),true); });
+  window.addEventListener("unhandledrejection",function(){ toast("An operation failed unexpectedly",true); });
+
+  boot();
+})();
+</script>
+</body>
+</html>
