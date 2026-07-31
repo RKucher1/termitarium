@@ -31,6 +31,12 @@ Viewer readability and live-stream fixes. No changes to `numbatd` or
   `+N` arrived, or unreachable — and poll failures now surface instead of being
   swallowed. Polling continues in a backgrounded tab and catches up immediately
   on `visibilitychange`.
+- **All times are local.** Row timestamps were sliced straight out of the UTC
+  ISO string while the timeline axis and range pills used local time, so the
+  same record appeared to occur at two different times — five hours apart on
+  US Central. Rows and the detail pane now render from the parsed epoch in the
+  viewer's timezone, and the detail timestamp carries its zone abbreviation.
+  The raw JSON still shows the original UTC value.
 - Fixed the detail pane's `observed` block ignoring the `command` field, which
   hid shell commands behind the raw JSON.
 

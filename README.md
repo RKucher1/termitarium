@@ -64,6 +64,10 @@ streaming it live.
 - **Sort order** — newest first by default; toggle with the button in the query
   bar or `s`. Records with no parseable timestamp always sort to the bottom, in
   file order, in both directions. The timeline stays chronological regardless.
+- **Local time everywhere** — numbat writes UTC; the viewer renders every time
+  in your timezone, so rows, the timeline axis, and range pills all agree. The
+  detail pane labels its timestamp with the zone, and the untouched UTC value
+  is always visible in the raw JSON.
 - **Query language** — `rule:chain sev:high agent:claude-code`, with `-` to
   negate. Fields: `rule` `sev` `agent` `type` `event` `session` `id`. Anything
   unprefixed is free text over the raw line *and* the description.

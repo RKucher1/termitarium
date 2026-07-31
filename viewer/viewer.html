@@ -916,7 +916,7 @@
     var ev=r.etype?'<i class="ev">'+esc(trunc(r.etype,40))+'</i>':"";
     var isFresh = freshFrom>=0 && r.i>=freshFrom;
     return '<div class="row'+(r.i===sel?" sel":"")+(isFresh?" fresh":"")+(r.sev?" sv-"+esc(r.sev):"")+'" data-i="'+r.i+'">'+
-      '<span class="ts">'+(r.ts?esc(r.ts.slice(11,19)):"—")+'</span>'+
+      '<span class="ts">'+(r.tms?esc(fmtHMS(r.tms)):(r.ts?esc(r.ts.slice(11,19)):"—"))+'</span>'+
       '<span class="kd k-'+esc(r.rt)+'">'+esc(r.rt)+'</span>'+
       '<span class="ag">'+esc(r.agent||"—")+'</span>'+
       '<span class="bd"><strong>'+body+'</strong>'+ev+'</span></div>';
@@ -962,7 +962,10 @@
     if(o.confidence) h+=tag("conf "+s(o.confidence),"");
     if(r.agent) h+=tag(r.agent,"");
     if(o.source_type) h+=tag(s(o.source_type),"");
-    if(r.ts) h+=tag(r.ts.replace("T"," ").slice(0,19),"");
+    if(r.ts){
+      var tz=tzName();
+      h+=tag(r.tms ? fmtLocal(r.tms)+(tz?" "+tz:"") : r.ts.replace("T"," ").slice(0,19),"");
+    }
     h+='</div></div><div class="dbody">';
     if(o.title) h+='<span class="lbl">title</span><div style="font-size:13.5px;line-height:1.55">'+esc(s(o.title))+'</div>';
     if(o.description) h+='<span class="lbl">description</span><div style="font-size:12.5px;line-height:1.6;color:var(--dim)">'+esc(s(o.description))+'</div>';
@@ -1244,6 +1247,26 @@
     return (b/1073741824).toFixed(2)+" GB";
   }
   function fmtT(ms){ try{ return new Date(ms).toLocaleString(); }catch(e){ return String(ms); } }
+  /* Records are written in UTC; operators read in their own timezone. Every
+     rendered time is local — the untouched UTC value stays in the raw JSON. */
+  function p2(n){ return (n<10?"0":"")+n; }
+  function fmtHMS(ms){
+    try{ var d=new Date(ms); return p2(d.getHours())+":"+p2(d.getMinutes())+":"+p2(d.getSeconds()); }
+    catch(e){ return "—"; }
+  }
+  function fmtLocal(ms){
+    try{
+      var d=new Date(ms);
+      return d.getFullYear()+"-"+p2(d.getMonth()+1)+"-"+p2(d.getDate())+" "+
+             p2(d.getHours())+":"+p2(d.getMinutes())+":"+p2(d.getSeconds());
+    }catch(e){ return ""; }
+  }
+  function tzName(){
+    try{
+      var m=new Date().toLocaleTimeString([],{timeZoneName:"short"}).match(/[A-Z]{2,5}(?:[+-]\d+)?$/);
+      return m?m[0]:"";
+    }catch(e){ return ""; }
+  }
   function stamp(){
     var d=new Date(),p=function(n){ return (n<10?"0":"")+n; };
     return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes());
