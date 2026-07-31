@@ -20,11 +20,12 @@ will move; check \`CHANGELOG.md\` for the version this tracks.
 
 | | |
 |---|---|
-| `viewer/viewer.html` | Single-file record viewer: plain-language descriptions, virtual scrolling, query language, timeline scrubbing, cited-event resolution |
+| `viewer/viewer.html` | Single-file record viewer: plain-language descriptions, per-finding interpretation, virtual scrolling, query language, timeline scrubbing, cited-event resolution |
 | `numbatd/main.go` | ~150-line Go server that serves the viewer and whitelisted `*.ndjson` over loopback |
 | `prune/numbat-prune` | Retention tool: archive-before-delete, atomic replace, never loses a record |
 | `install.sh` | Per-user install, builds the binary, wires launchd |
-| `test/viewer-logic.js` | Unit tests for the viewer's record-description logic — `node test/viewer-logic.js`, no dependencies |
+| `tools/gen-rule-catalog.js` | Maintainer tool: regenerates the viewer's embedded rule catalog from numbat's rule YAML. Never needed at runtime |
+| `test/viewer-logic.js` | Unit tests for the viewer's description and interpretation logic — `node test/viewer-logic.js`, no dependencies |
 
 ## Install
 
@@ -94,11 +95,56 @@ Virtualized rendering, chunked parsing, and a cached lowercase index per record
 keep it responsive on large files. All output is HTML-escaped — agent command
 text is untrusted input.
 
-The description logic is pure and unit-tested:
+The description and interpretation logic is pure and unit-tested:
 
 ```sh
 node test/viewer-logic.js
 ```
+
+### Per-finding interpretation
+
+Selecting a finding shows an interpretation derived from that record, not a
+fixed paragraph. It answers four questions: what the rule looks for, what it
+saw here, why it fired, and what the record does and does not establish.
+
+It is computed locally and deterministically — no model call, no network. The
+rule text comes from a catalog embedded in the viewer: a finding carries its
+rule's `title`, but not the `description` that explains what the rule actually
+looks for, so that has to be shipped with the viewer.
+
+The interpretation states only what the record supports. A finding whose
+`observed_event_type` is `command.exec` under a live hook was seen *before* it
+ran, so it says the record does not show whether it executed; a `file.write`
+arrives from both the pre- and post-tool hook, so it claims no ordering at all;
+an at-rest `artifact` finding says it was reconstructed after the fact. Where a
+field is missing, the line is omitted rather than guessed.
+
+Two fields are easy to over-read, and the interpretation is careful with both.
+`confidence` grades how directly evidence backs the *observation* — a hook is
+the agent's own report rather than a durable artifact, which is why hook events
+are capped at `medium`. It is not uncertainty about the match (rule evaluation
+is exact) and not a probability of harm. `observed_actor` is a classification
+numbat applies by construction, not something it measures, so `assistant` means
+the agent issued the tool call — the operator may still have asked for it.
+
+Records carry `rule_version`. When it disagrees with the embedded catalog the
+description is still shown but marked, so a numbat upgrade degrades visibly
+instead of silently. The marker does not claim the text is merely *older*: a
+`--rules-dir` rule replaces a shipped rule by id, so the catalog may be
+describing a different rule rather than an earlier version of the same one.
+
+To regenerate the catalog after a numbat upgrade:
+
+```sh
+node tools/gen-rule-catalog.js --rules-dir /path/to/numbat/rules
+```
+
+That rewrites a marked block in `viewer.html` and records the numbat commit it
+read. It is a maintainer tool — the viewer remains a single self-contained file
+with no build step, and nothing in `tools/` is needed to use it.
+
+Rule titles and descriptions embedded in the viewer are © the numbat authors,
+used under the Apache License 2.0.
 
 ## Security posture
 
@@ -166,3 +212,8 @@ Monday 9am for that reason.
 ## License
 
 MIT. See `LICENSE`.
+
+The rule titles and descriptions embedded in `viewer/viewer.html` between the
+`[rulecat:begin]` and `[rulecat:end]` markers are © the numbat authors and are
+redistributed under the Apache License 2.0. The generated block records the
+numbat commit they were taken from.

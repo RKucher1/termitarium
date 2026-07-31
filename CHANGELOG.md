@@ -1,5 +1,85 @@
 # Changelog
 
+## 0.3.0 — 2026-07-31
+
+Per-finding interpretation. No changes to `numbatd` or `numbat-prune`.
+
+- **Findings are interpreted from the record, not described by a fixed
+  paragraph.** Every finding used to carry the same static caveat, which is
+  read once and ignored afterwards. Selecting a finding now answers four
+  questions about that specific record: what the rule looks for, what it saw
+  here, why it fired, and what the record does and does not establish. It stays local and
+  deterministic — no model call, no network, no new dependency.
+- **An embedded rule catalog.** A finding carries its rule's `title` but not
+  the `description` that says what the rule actually looks for, so the viewer
+  embeds 51 rules generated from numbat's source by the new
+  `tools/gen-rule-catalog.js`. The generated block records the numbat commit it
+  was read from — a release tag is not enough, since many commits share one.
+  The tool is maintainer-only: the viewer is still a single self-contained file
+  with no build step. Rule text is © the numbat authors, Apache-2.0, attributed
+  in the generated header and in `README.md`.
+- **Version drift degrades visibly.** Records carry `rule_version`. When it
+  disagrees with the embedded catalog the description is still shown — a bump
+  usually refines a pattern rather than changing intent — but it is marked.
+  The marker names both versions and does not claim the catalog text is merely
+  older: a `--rules-dir` rule replaces a shipped rule by id, so the catalog may
+  be describing a different rule entirely.
+- **The interpretation claims only what the record supports.** The previous
+  static note asserted that hook records describe a *proposed* action; that is
+  true only sometimes. numbat registers both `PreToolUse` and `PostToolUse`, so
+  `source_type: hook` proves nothing about ordering on its own. Only
+  `command.exec` under a live hook now carries the "seen before it ran" claim;
+  `file.write` and `file.delete` arrive from both sides and claim no ordering;
+  an at-rest `artifact` finding says it was reconstructed after the fact.
+  `observed_actor` speaks only for `assistant` and `user`, and is silent when
+  absent. A chain rule states that numbat *observed* its steps in that order,
+  and explicitly not that data flowed between them.
+- **Rule text is treated as untrusted.** The catalog becomes executable
+  JavaScript inside a `<script>` element, so the generator emits values as JSON
+  and then escapes `< > & *` and U+2028/U+2029, which is what actually prevents
+  `</script>` from closing the element early. It re-parses its own output and
+  fails the build on any mismatch. It refuses symlinks, never reads outside
+  `--rules-dir`, and never executes what it reads. A hostile rule fixture
+  covers this.
+- **Two fields the interpretation refuses to over-read.** `confidence` grades
+  how directly evidence backs the observation — hook events are capped at
+  `medium` because the evidence is the agent's own report, not a durable
+  artifact. It is not uncertainty about the match, since rule evaluation is
+  exact, and it is not a probability of harm; the 0.2.0 note calling it "parser
+  certainty" was closer, and an earlier draft of this change called it match
+  certainty, which was wrong outright. `observed_actor` is a classification
+  numbat applies by construction rather than an observation, so `assistant` now
+  reads as "the agent issued this as a tool call — the operator may still have
+  asked for it or approved it" instead of asserting the operator was uninvolved.
+- **A chain finding says which step it is showing.** `observed_*` on a sequence
+  match is the completing event only, so the shown command is labelled as the
+  final step, and the pre-action line no longer implies the whole chain was
+  caught before it ran — the earlier steps had already happened.
+- **Rule text can no longer corrupt the viewer on a later regeneration.** A
+  description containing this file's own `[rulecat:end]` marker passed every
+  check and shipped inertly, then spliced the block on the next run and left
+  stray tokens in the viewer's only `<script>` — a syntax error that broke the
+  whole page. `*` is now escaped, so rule text cannot spell a comment marker,
+  and the block is rejected if a marker appears twice. The round-trip check
+  also compares per rule id instead of whole-object, so a rule whose id sorts
+  differently from its filename no longer aborts the build with a misleading
+  "escaping defect" error. Rule ids that would poison an object literal
+  (`__proto__`, `constructor`, `prototype`) are rejected rather than silently
+  dropped, and the parser now reads block-style YAML lists and refuses inline
+  comments, wrapped lists, quoted list items and escaped quotes instead of
+  mis-reading them.
+- Multi-line commands keep their line breaks in the interpretation; folding a
+  shell script onto one line ran its heredoc body into the command and made the
+  summary harder to read than the raw record.
+- The viewer declares its own inlined SVG icon, which removes the `favicon.ico`
+  404 every page load produced. Source kept at `viewer/favicon.svg`.
+- Extended `test/viewer-logic.js` to 295 assertions. Interpretation fixtures are
+  built from the embedded catalog rather than hand-written, so a regeneration
+  that changes a rule's text cannot pass unnoticed. The `99.0` override in
+  `~/numbat-policy` is covered as a unit case; note it is `enabled: false`, and
+  numbat excludes disabled rules from the compiled engine, so it cannot
+  actually emit a finding — the staleness path has no real-corpus coverage.
+
 ## 0.2.0 — 2026-07-31
 
 Viewer readability and live-stream fixes. No changes to `numbatd` or
