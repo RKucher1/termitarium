@@ -1,15 +1,35 @@
-function nb --description "numbat-tools control"
+function nb --description "Termitarium control"
     set -l port __PORT__
     set -l dir __DIR__
     switch "$argv[1]"
         case view ""
             open "http://127.0.0.1:$port/"
         case start
-            launchctl load ~/Library/LaunchAgents/com.numbat-tools.numbatd.plist 2>/dev/null
-            echo "numbatd started"
+            # Report what launchctl actually did. Swallowing its stderr meant a
+            # missing or renamed plist looked identical to a successful start.
+            set -l plist ~/Library/LaunchAgents/com.siliconhills.numbatd.plist
+            if not test -f "$plist"
+                echo "nb: $plist not found — daemon not started. Run ./install.sh" >&2
+                return 1
+            end
+            if launchctl load "$plist"
+                echo "numbatd started"
+            else
+                echo "nb: launchctl could not load $plist" >&2
+                return 1
+            end
         case stop
-            launchctl unload ~/Library/LaunchAgents/com.numbat-tools.numbatd.plist 2>/dev/null
-            echo "numbatd stopped"
+            set -l plist ~/Library/LaunchAgents/com.siliconhills.numbatd.plist
+            if not test -f "$plist"
+                echo "nb: $plist not found — nothing to stop" >&2
+                return 1
+            end
+            if launchctl unload "$plist"
+                echo "numbatd stopped"
+            else
+                echo "nb: launchctl could not unload $plist" >&2
+                return 1
+            end
         case status
             if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$port/api/sources"
                 echo "numbatd  running   http://127.0.0.1:$port/"

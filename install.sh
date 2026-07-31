@@ -12,8 +12,8 @@ set -euo pipefail
 NUMBAT_DIR="${NUMBAT_DIR:-$HOME/.numbat}"
 AGENTS="$HOME/Library/LaunchAgents"
 PORT="${NUMBAT_PORT:-8787}"
-LABEL_D="com.numbat-tools.numbatd"
-LABEL_P="com.numbat-tools.prune"
+LABEL_D="com.siliconhills.numbatd"
+LABEL_P="com.siliconhills.numbat-prune"
 DO_AGENTS=1
 
 say(){ printf '\033[1m›\033[0m %s\n' "$1"; }

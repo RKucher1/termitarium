@@ -1,4 +1,4 @@
-# numbat-tools
+# Termitarium
 
 A local viewer, a hardened localhost server, and a retention tool for
 [numbat](https://github.com/perplexityai/numbat) record streams.
@@ -30,8 +30,8 @@ will move; check \`CHANGELOG.md\` for the version this tracks.
 ## Install
 
 ```sh
-git clone https://github.com/YOURNAME/numbat-tools
-cd numbat-tools
+git clone https://github.com/RKucher1/termitarium
+cd termitarium
 ./install.sh
 nb
 ```
