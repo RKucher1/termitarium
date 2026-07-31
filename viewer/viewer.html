@@ -573,6 +573,15 @@
     return t.length > n ? t.slice(0, n - 1) + "…" : t;
   }
   function dsNum(v){ return (typeof v === "number" && isFinite(v)) ? v : null; }
+  function dsList(v, n){
+    if(!Array.isArray(v) || !v.length) return "";
+    var parts = [];
+    for(var i=0;i<v.length;i++){ var t = dsStr(v[i]); if(t) parts.push(t); }
+    if(!parts.length) return "";
+    var head = dsTrunc(parts[0], n);
+    return parts.length > 1 ? head + " +" + (parts.length - 1) + " more" : head;
+  }
+  function dsWords(v){ return dsStr(v).replace(/[_-]+/g, " ").trim(); }
   function dsPath(v){
     var p = dsTrunc(v, 400);
     if(!p || p.length <= 58) return p;
@@ -647,7 +656,8 @@
       if(rt === "event") return dsEvent(o);
 
       if(rt === "finding"){
-        var title = dsTrunc(o.title, 90), rule = dsTrunc(o.rule_id, 60);
+        var title = dsTrunc(o.title, 90);
+        var rule  = dsTrunc(o.rule_id, 60) || dsList(o.rule_ids, 60);
         if(title && rule) return title + " — matched " + rule;
         if(title) return title;
         if(rule)  return "Matched " + rule;
@@ -655,13 +665,17 @@
       }
       if(rt === "enforcement"){
         var dec = dsTrunc(o.decision, 40).toLowerCase();
-        var why = dsTrunc(o.deny_rule_id, 60) || dsTrunc(o.reason, 90);
-        if(dec === "deny" || dec === "block" || dec === "blocked")
-          return why ? "Blocked an action: " + why : "Blocked an action";
-        if(dec === "allow" || dec === "allowed")
-          return why ? "Allowed an action: " + why : "Allowed an action";
-        if(dec) return "Enforcement decision: " + dec + (why ? " (" + why + ")" : "");
-        return why ? "Enforcement decision: " + why : "Recorded an enforcement decision";
+        var why = dsTrunc(o.deny_rule_id, 60) || dsList(o.rule_ids, 60) || dsWords(dsTrunc(o.reason, 90));
+        var tail = why ? ": " + why : "";
+        if(dec === "deny" || dec === "block" || dec === "blocked")  return "Blocked an action" + tail;
+        if(dec === "allow" || dec === "allowed")                    return "Allowed an action" + tail;
+        // monitor-mode records a decision not to act; say so plainly
+        if(dec === "no_override" || dec === "monitor" || dec === "observe"){
+          var mode = dsWords(dsTrunc(o.mode, 20));
+          return "Did not intervene" + (mode ? " (" + mode + " mode)" : "") + tail;
+        }
+        if(dec) return "Enforcement decision: " + dsWords(dec) + tail;
+        return why ? "Enforcement decision" + tail : "Recorded an enforcement decision";
       }
       if(rt === "indicator"){
         var ty = dsTrunc(o.type, 30), val = dsTrunc(o.value, 90), c = dsNum(o.count);

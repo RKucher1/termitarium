@@ -124,6 +124,39 @@ eq("enforcement deny",
    describe({ record_type:"enforcement", decision:"deny", deny_rule_id:"net.egress.block" }),
    "Blocked an action: net.egress.block");
 
+// numbat's real enforcement records use decision:"no_override" with rule_ids[]
+// and reason:"monitor_mode" — there is no deny_rule_id outside the spec table.
+eq("enforcement in monitor mode says it did not act",
+   describe({ record_type:"enforcement", decision:"no_override", mode:"monitor",
+              reason:"monitor_mode", rule_ids:["tamper.detector_state_write"] }),
+   "Did not intervene (monitor mode): tamper.detector_state_write");
+
+eq("enforcement summarises multiple rule_ids",
+   describe({ record_type:"enforcement", decision:"deny", rule_ids:["a.rule","b.rule","c.rule"] }),
+   "Blocked an action: a.rule +2 more");
+
+eq("enforcement prefers deny_rule_id when both are present",
+   describe({ record_type:"enforcement", decision:"deny",
+              deny_rule_id:"net.egress.block", rule_ids:["other.rule"] }),
+   "Blocked an action: net.egress.block");
+
+eq("an unknown decision is de-underscored rather than echoed raw",
+   describe({ record_type:"enforcement", decision:"soft_warn", reason:"rate_limited" }),
+   "Enforcement decision: soft warn: rate limited");
+
+eq("a finding falls back to rule_ids when rule_id is absent",
+   describe({ record_type:"finding", title:"Agent targeted numbat's state directory",
+              rule_ids:["tamper.detector_state_write"] }),
+   "Agent targeted numbat's state directory — matched tamper.detector_state_write");
+
+eq("an empty rule_ids array does not fabricate a rule",
+   describe({ record_type:"finding", title:"Something happened", rule_ids:[] }),
+   "Something happened");
+
+eq("a rule_ids array of nulls does not fabricate a rule",
+   describe({ record_type:"finding", title:"Something happened", rule_ids:[null,null] }),
+   "Something happened");
+
 eq("indicator counts occurrences",
    describe({ record_type:"indicator", type:"domain", value:"api.supabase.com", count:3 }),
    "Saw domain api.supabase.com, 3 times");
