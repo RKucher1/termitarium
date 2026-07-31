@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.1 — 2026-07-31
+
+- **The viewer moved out of the directory numbat watches.** Deploying it into
+  `~/.numbat/tools/` matched `tamper.detector_state_write` on every deploy —
+  six of nine findings on the author's own machine were his own deploys. A rule
+  that fires mostly on your routine stops being a signal. `numbatd` takes a
+  `-tools` flag (default `<dir>/tools`, so existing installs are unaffected),
+  `install.sh` installs the viewer and icon to `~/.termitarium`, and an install
+  clears the assets an older layout left behind. Records stay in `~/.numbat`.
+  Verified by execution: the deploy command that previously produced a finding
+  now produces none.
+
 ## 0.4.0 — 2026-07-31
 
 Installer correctness, a real favicon, and the bugs found looking for more of

@@ -171,6 +171,11 @@ hostile pages in your browser*.
   the filesystem — traversal is impossible by construction, not by filtering.
   It sits behind the same Host check, method restriction, and `nosniff` header
   as every other route.
+- **The viewer lives outside the watched directory.** `-dir` holds records;
+  `-tools` holds `viewer.html` and `favicon.png`, installed to
+  `~/.termitarium`. Redeploying the viewer into `~/.numbat` matched numbat's
+  own `tamper.detector_state_write` rule every time, so routine deploys
+  generated most of the findings and trained you to ignore that rule.
 - **Whitelist serving.** Only `[A-Za-z0-9._-]*.ndjson` in the data directory,
   with symlink resolution checked against the root. No directory listing.
   GET/HEAD only.

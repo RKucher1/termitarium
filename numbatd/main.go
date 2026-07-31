@@ -1,9 +1,13 @@
 // numbatd — minimal hardened localhost server for the numbat record viewer.
 //
-//   GET  /              the viewer (tools/viewer.html)
-//   GET  /favicon.ico   the viewer icon (tools/favicon.png)
+//   GET  /              the viewer (viewer.html)
+//   GET  /favicon.ico   the viewer icon (favicon.png)
 //   GET  /api/sources   JSON list of *.ndjson files in the numbat dir
 //   GET  /files/{name}  a whitelisted .ndjson file (HEAD supported)
+//
+// -dir holds the record files; -tools holds viewer.html and favicon.png. They
+// are separate so redeploying the viewer need not write into the directory
+// numbat watches for tampering.
 //
 // Security posture:
 //   * binds 127.0.0.1 only
@@ -29,6 +33,7 @@ import (
 
 var (
 	dir      string
+	toolsDir string
 	addr     string
 	nameOK   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*\.ndjson$`)
 	hostOK   = regexp.MustCompile(`^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$`)
@@ -65,9 +70,9 @@ func viewer(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	p := filepath.Join(dir, "tools", "viewer.html")
+	p := filepath.Join(toolsDir, "viewer.html")
 	if _, err := os.Stat(p); err != nil {
-		http.Error(w, "viewer.html not found under "+filepath.Join(dir, "tools"), http.StatusNotFound)
+		http.Error(w, "viewer.html not found under "+toolsDir, http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -78,7 +83,7 @@ func viewer(w http.ResponseWriter, r *http.Request) {
 // data: URIs, so the inline icon in viewer.html covers file:// use and this
 // covers everything served over the daemon.
 //
-// The served path is a compile-time constant joined to -dir: no part of the
+// The served path is a compile-time constant joined to -tools: no part of the
 // request reaches the filesystem, so traversal is impossible by construction
 // rather than by filtering. It sits behind guard() like every other route,
 // which supplies the Host check, the GET/HEAD restriction, and nosniff.
@@ -87,7 +92,7 @@ func favicon(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	p := filepath.Join(dir, "tools", "favicon.png")
+	p := filepath.Join(toolsDir, "favicon.png")
 	if _, err := os.Stat(p); err != nil {
 		http.NotFound(w, r)
 		return
@@ -150,7 +155,16 @@ func main() {
 	home, _ := os.UserHomeDir()
 	flag.StringVar(&dir, "dir", filepath.Join(home, ".numbat"), "numbat data directory")
 	flag.StringVar(&addr, "addr", "127.0.0.1:8787", "listen address (loopback only)")
+	// Kept separate from -dir so the viewer can live outside the directory
+	// numbat watches. Redeploying the viewer into $HOME/.numbat matched
+	// tamper.detector_state_write on every deploy, which trains the operator
+	// to ignore that rule. Defaults to <dir>/tools for existing installs.
+	flag.StringVar(&toolsDir, "tools", "", "directory holding viewer.html and favicon.png (default <dir>/tools)")
 	flag.Parse()
+
+	if toolsDir == "" {
+		toolsDir = filepath.Join(dir, "tools")
+	}
 
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil || (host != "127.0.0.1" && host != "localhost" && host != "::1") {

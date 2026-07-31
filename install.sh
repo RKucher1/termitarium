@@ -10,6 +10,12 @@
 set -euo pipefail
 
 NUMBAT_DIR="${NUMBAT_DIR:-$HOME/.numbat}"
+# The viewer lives OUTSIDE the directory numbat watches. Redeploying it into
+# $HOME/.numbat matched tamper.detector_state_write on every single deploy, so
+# the operator's own routine generated most of their findings and the rule
+# stopped carrying information. Records stay in NUMBAT_DIR; only the served
+# assets moved.
+TOOLS_DIR="${TERMITARIUM_TOOLS:-$HOME/.termitarium}"
 AGENTS="$HOME/Library/LaunchAgents"
 PORT="${NUMBAT_PORT:-8787}"
 # Overridable so the test suite can operate on labels that cannot collide with
@@ -124,7 +130,9 @@ if [ "${UNINSTALL:-0}" = "1" ]; then
     fi
   done
   rm -f "$NUMBAT_DIR/bin/numbatd" "$NUMBAT_DIR/bin/numbat-prune" \
+        "$TOOLS_DIR/viewer.html" "$TOOLS_DIR/favicon.png" \
         "$NUMBAT_DIR/tools/viewer.html" "$NUMBAT_DIR/tools/favicon.png"
+  rmdir "$TOOLS_DIR" "$NUMBAT_DIR/tools" 2>/dev/null || true
   rm -f "$HOME/.config/fish/functions/nb.fish"
 
   # Say what is actually true rather than assuming the removals worked.
@@ -143,15 +151,24 @@ fi
 command -v go >/dev/null 2>&1 || die "go toolchain not found (brew install go)"
 command -v python3 >/dev/null 2>&1 || die "python3 not found"
 
-mkdir -p "$NUMBAT_DIR/tools" "$NUMBAT_DIR/bin" "$AGENTS"
+mkdir -p "$NUMBAT_DIR/bin" "$TOOLS_DIR" "$AGENTS"
 
 say "building numbatd"
 ( cd "$(dirname "$0")/numbatd" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$NUMBAT_DIR/bin/numbatd" . )
 
-say "installing viewer, icon and prune"
-install -m 644 "$(dirname "$0")/viewer/viewer.html" "$NUMBAT_DIR/tools/viewer.html"
-install -m 644 "$(dirname "$0")/viewer/favicon.png" "$NUMBAT_DIR/tools/favicon.png"
+say "installing viewer and icon into $TOOLS_DIR"
+install -m 644 "$(dirname "$0")/viewer/viewer.html" "$TOOLS_DIR/viewer.html"
+install -m 644 "$(dirname "$0")/viewer/favicon.png" "$TOOLS_DIR/favicon.png"
+say "installing prune"
 install -m 755 "$(dirname "$0")/prune/numbat-prune" "$NUMBAT_DIR/bin/numbat-prune"
+
+# One-time: clear the assets an older install left inside the watched
+# directory, so nothing stale is served and the old path stops existing.
+if [ -f "$NUMBAT_DIR/tools/viewer.html" ] || [ -f "$NUMBAT_DIR/tools/favicon.png" ]; then
+  rm -f "$NUMBAT_DIR/tools/viewer.html" "$NUMBAT_DIR/tools/favicon.png"
+  rmdir "$NUMBAT_DIR/tools" 2>/dev/null || true
+  say "removed the old viewer from $NUMBAT_DIR/tools (it now lives in $TOOLS_DIR)"
+fi
 
 if [ "$DO_AGENTS" = "1" ] && [ "$(uname -s)" = "Darwin" ]; then
   migrate_legacy
@@ -166,6 +183,7 @@ if [ "$DO_AGENTS" = "1" ] && [ "$(uname -s)" = "Darwin" ]; then
     <string>$NUMBAT_DIR/bin/numbatd</string>
     <string>-addr</string><string>127.0.0.1:$PORT</string>
     <string>-dir</string><string>$NUMBAT_DIR</string>
+    <string>-tools</string><string>$TOOLS_DIR</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

@@ -38,6 +38,7 @@ FAKE_LEGACY="com.termitarium-test.$$.legacy-numbatd com.termitarium-test.$$.lega
 
 run_install(){  # run_install <extra args...>
   env HOME="$SANDBOX/home" NUMBAT_DIR="$SANDBOX/numbat" NUMBAT_PORT=8791 \
+      TERMITARIUM_TOOLS="$SANDBOX/tools" \
       NUMBAT_LABEL_D="$FAKE_D" NUMBAT_LABEL_P="$FAKE_P" \
       NUMBAT_LEGACY_LABELS="$FAKE_LEGACY" \
       bash "$INSTALL" "$@" 2>&1
@@ -126,14 +127,22 @@ oke "favicon.png is a valid 32x32 PNG" "$png_ok" "$png_ok"
 
 # install.sh must actually install it, or the route 404s
 grep -q 'favicon.png' "$INSTALL"; ok "install.sh installs the icon" $?
+grep -q '\-tools' "$INSTALL"; ok "the plist passes -tools to numbatd" $?
+grep -q 'toolsDir' "$ROOT/numbatd/main.go"; ok "numbatd honours a -tools directory" $?
 
 # ── install, twice, into a sandbox ─────────────────────────────────────────
 
 if command -v go >/dev/null 2>&1; then
   out1="$(run_install --no-agents)"
   ok "first --no-agents install succeeds" $?
-  [ -f "$SANDBOX/numbat/tools/viewer.html" ]; ok "viewer.html installed" $?
-  [ -f "$SANDBOX/numbat/tools/favicon.png" ]; ok "favicon.png installed" $?
+  [ -f "$SANDBOX/tools/viewer.html" ]; ok "viewer.html installed" $?
+  [ -f "$SANDBOX/tools/favicon.png" ]; ok "favicon.png installed" $?
+  # The whole point of the move: nothing served may live under the directory
+  # numbat watches, or every deploy trips tamper.detector_state_write.
+  [ ! -e "$SANDBOX/numbat/tools/viewer.html" ]
+  ok "no viewer is written into the watched record directory" $?
+  [ ! -e "$SANDBOX/numbat/tools/favicon.png" ]
+  ok "no icon is written into the watched record directory" $?
   [ -x "$SANDBOX/numbat/bin/numbatd" ];       ok "numbatd installed" $?
   [ -x "$SANDBOX/numbat/bin/numbat-prune" ];  ok "numbat-prune installed" $?
 
@@ -145,10 +154,10 @@ if command -v go >/dev/null 2>&1; then
   esac
 
   # Idempotency: a second run must succeed and leave the same files.
-  sum1="$(cd "$SANDBOX/numbat" && find . -type f | sort | xargs shasum 2>/dev/null | shasum | cut -d' ' -f1)"
+  sum1="$(cd "$SANDBOX" && find numbat tools -type f 2>/dev/null | sort | xargs shasum 2>/dev/null | shasum | cut -d' ' -f1)"
   out2="$(run_install --no-agents)"
   ok "second --no-agents install succeeds (idempotent)" $?
-  sum2="$(cd "$SANDBOX/numbat" && find . -type f | sort | xargs shasum 2>/dev/null | shasum | cut -d' ' -f1)"
+  sum2="$(cd "$SANDBOX" && find numbat tools -type f 2>/dev/null | sort | xargs shasum 2>/dev/null | shasum | cut -d' ' -f1)"
   [ "$sum1" = "$sum2" ]; ok "a repeat install leaves identical files" $?
 
   # With a fish config present it must install the function and say so.
@@ -181,8 +190,8 @@ if launchctl list 2>/dev/null | grep -q "[[:space:]]com.siliconhills.numbatd$"; 
 else
   fails+=("THE SUITE DISTURBED THE REAL com.siliconhills.numbatd AGENT — rerun ./install.sh")
 fi
-[ ! -f "$SANDBOX/numbat/tools/viewer.html" ];  ok "uninstall removes viewer.html" $?
-[ ! -f "$SANDBOX/numbat/tools/favicon.png" ];  ok "uninstall removes favicon.png" $?
+[ ! -f "$SANDBOX/tools/viewer.html" ];  ok "uninstall removes viewer.html" $?
+[ ! -f "$SANDBOX/tools/favicon.png" ];  ok "uninstall removes favicon.png" $?
 [ ! -f "$SANDBOX/home/.config/fish/functions/nb.fish" ]; ok "uninstall removes the fish function" $?
 
 # ── nb.fish must not swallow launchctl failures ────────────────────────────
