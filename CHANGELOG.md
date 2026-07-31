@@ -4,6 +4,187 @@ Releases 0.2.0 through 0.5.0 were tagged retroactively, after the fact, at the
 commit where each version's notes below were completed. Only `v0.1.0` was
 tagged at the time.
 
+## 0.6.0
+
+Events get the treatment findings already had. A finding got four explanatory
+sections; an event got a one-line description, a raw command block, and a JSON
+dump — and events are 6,715 of the 6,839 records in the reference corpus, so
+the overwhelming majority of what an operator reads was the least explained
+thing in the app.
+
+- **`explain(record, index)` — per-event interpretation.** Four sections,
+  adapted per event type: what this is, what happened next (or what this
+  responds to), any findings that cite it, and what the record does and does
+  not establish. Rendered in the same slot as the finding interpretation, above
+  `OBSERVED`; the raw command block and `FULL RECORD` are untouched. Sections
+  are omitted when the record has nothing to put in them, so a `command.result`
+  with one useful fact gets three short lines rather than a padded template.
+
+  `interpret()` is pure over one record because a finding carries its own rule
+  id and observed fields. An event carries neither: what it means depends on
+  the records beside it. Rather than reach for a global, `explain()` takes an
+  index built once by `buildIndex()` and passed in — the same shape `rollup()`
+  already uses for bucketed sessions. Both functions live in one marked block,
+  so the pure surface stays liftable and the tests build fixtures from object
+  literals instead of mocks.
+
+- **The reverse citation index.** `cited_event_ids` only ran finding→event.
+  An event now knows which findings cite it, names the rule, and links to it —
+  the mirror of the jump buttons findings already had. The relation is treated
+  as many-to-many; it is one-to-one in this corpus and nothing depends on that.
+
+- **Four pair shapes, not two.** `tool_call_id` was assumed to join
+  `command.exec`↔`command.result` and `tool.call`↔`tool.result`. The corpus
+  says otherwise: `tool.result` (1,268) mostly answers *file* events —
+  `file.write` (637) + `file.read` (547) + `tool.call` (84), summing exactly.
+  All four shapes are handled.
+
+- **`file.read` and `file.write` no longer imply a completed operation.** In
+  all 3,228 pairs in the corpus the call side precedes the result side, without
+  exception, so these events are the request, not the outcome. The explanation
+  says *asked to write* and states that the record does not show whether the
+  write completed — the same correction `command.exec` received when *Ran*
+  became *Proposed*. `describe()`'s row text was corrected to match, once a
+  cold reviewer showed the two panes disagreeing on screen (below).
+
+- **A missing result is never rendered as failure.** 13 of 1,973 proposed
+  commands have no `command.result`, and 12 of those 13 are mid-session — so
+  the absence is not truncation either. The pane says no result was recorded
+  and that this shows neither failure nor execution. No record in the corpus
+  carries an `exit_code` at all; where one exists the pane reports it, and
+  where none does it says whether the command succeeded is not recorded.
+
+- **Session context survives record selection.** Narrowing to a session and
+  clicking any row silently discarded the rollup, with no way back except an
+  isolate button buried in whichever record happened to be clicked — which
+  reads as a missing feature rather than as navigation. The pane header now
+  keeps a labelled return to the summary whenever the view is one session.
+  Persisting the whole rollup above every record was the alternative; it would
+  push the explanation below the fold on every selection and re-render a rollup
+  per arrow-key press.
+
+- **Join keys are refused rather than truncated.** Record-derived keys are
+  bounded, as elsewhere — but truncating a *join* key can fuse two distinct ids
+  into one pair, and a fabricated pair is a worse failure than no pair. Keys
+  over 200 characters are not indexed. The longest real `tool_call_id` in the
+  corpus is 30 characters. Index maps are null-prototype, so a record whose id
+  is `__proto__` cannot reach `Object.prototype`.
+
+Four cold reviewers then read the finished state with no memory of how it was
+built — coherence, security, honesty of claims, and actionability — and between
+them found enough to change the design.
+
+- **The caveat section was 60% constant text, so it taught the eye to skip.**
+  Measured over the corpus: the four most repeated strings were 59.9% of all
+  explanation output, and the `confidence` bullet alone was 25% — on 100% of
+  panes, always last, explaining a field that has one value (`medium`) across
+  all 6,715 events. A constant sitting where the rare real caveat lives is
+  worse than nothing: it trains the reader past the eight `permission.requested`
+  records whose caveat is real. The bullet is gone; the value is still a header
+  tag. The `sub_agent` note went from 174 characters to 120, and the headline
+  now names the subagent, which no other line in the pane did. Output is down
+  from 576 to 406 characters per record.
+
+- **The headline duplicated the row summary verbatim on 1,268 records.** Every
+  `tool.result` opened with the summary line's own sentence plus a period. It
+  now reports what the record does *not* carry — no `tool.result` in the corpus
+  carries any payload — which is the operator's next question. Exact-duplicate
+  headlines: 1,268 → 0.
+
+- **The pair was computed and then thrown away.** `exPairOf()` located the
+  counterpart and the pane only described it, leaving the operator to find it by
+  hand. It is a jump button now, like a finding's cited events.
+
+- **Four claims that were true of this corpus but unverified in the code.**
+  The forward branch named the counterpart type it *expected* rather than the
+  one it *found* (a `file.read` joined to a `command.result` announced a
+  `tool.result` that was not there); the backward branch took its verb from the
+  subject, so a result paired with a result was described as "where the command
+  was proposed"; `tool_error` was attributed "only" to the agent's own marker,
+  which the project's own README says is false for OTLP records; and
+  `exit_code` was accepted only as an integer, so a float produced "carries no
+  exit code" while `describe()` rendered it happily.
+
+- **Three different absences were being reported as one.** A record with no
+  `tool_call_id`, a record whose key this viewer declines to index, and a record
+  whose counterpart is genuinely missing are now distinguished. Reporting an
+  indexing limit as "does not appear in this file" is a fabricated absence —
+  the same class of error as a fabricated pair, and in a forensic tool a
+  serious thing to say about a record sitting two rows away. Where several
+  records share one key, the pane declines to name any of them.
+
+- **`explain()` called a chat message a tool call.** The actor caveat was gated
+  on `actor === "assistant"` alone, so it fired on all 53 `message.assistant`
+  records — the agent writing prose to the operator — telling the reader it was
+  "issued as a tool call", directly under a headline that correctly said
+  otherwise. Now gated on event type. Likewise `decision: "asked"` was announced
+  as an approval decision and then contradicted in the next clause; "asked" is
+  the marker that a decision was *requested*.
+
+- **`describe()` was the outlier, and its own pane now contradicted it.** The
+  "don't imply what the record doesn't establish" rule had been applied to
+  `command.exec` and swept for nowhere else. `Wrote a file` asserted a completed
+  write on 637 records while the explanation directly beneath said the record
+  does not show whether the write completed; `Session started` was asserted for
+  107 boundary events that belong to a subagent, not the session; and
+  `Command finished successfully` was the one verdict left anywhere in the
+  product. All three corrected.
+
+- **`tool_error` is now visible in the row list.** 32 records carry the only
+  failure signal in the corpus, and finding them meant opening records one at a
+  time.
+
+The security pass attacked every new render path rather than reading it, and
+found four real defects plus a pre-existing one. No XSS was found: a 160-byte
+polyglot placed in eighteen different fields across every affected record
+produced zero injected nodes, zero `on*` attributes, and zero dialogs in real
+Chrome — `esc()` held as the single escape point.
+
+- **Two lookup tables were read with a bare `[]`.** Every `Object.prototype`
+  member name is a legal `event_type`, so a record typed `constructor` or
+  `toString` was treated as a known type: it gated a whole "What this responds
+  to" section on and told the operator the requesting event was *missing from
+  this file* — a fabricated absence, in the one function whose comment forbids
+  exactly that. The same defect in the mate-selection loop let a decoy record
+  typed `toString` displace a genuine `command.exec`, so a result was described
+  as answering the decoy and the decoy's path was attributed to it, while a
+  `curl … | sh` sitting on the same key was never shown. Both now go through
+  `hasOwnProperty`.
+
+- **Join keys were whitespace-normalised, so a trailing space forged a pair.**
+  `"abc"` and `"abc "` indexed to the same record. The same normalisation
+  desynced these keys from the id indexes the viewer builds over the raw
+  `event_id`, which silently broke jump buttons. Keys are now matched exactly,
+  and anything carrying whitespace or a control character is refused.
+
+- **The per-key cap suppressed evidence silently.** Eight cheap decoy records
+  sharing one `tool_call_id` pushed the genuine `command.result` out of the
+  index, so a `tool_error` — the only failure signal these records carry — was
+  dropped without a word. Bounding is right; doing it silently is not. A
+  truncated key now says the counterpart named may not be the right one.
+
+- **A finding's cited events were rendered without a cap.** `buildIndex()`
+  bounds the same list; the render loop 200 lines away did not, and it wired a
+  listener per button. A finding citing 2,000,000 events — a 24 MB file, well
+  under the size guard — built two million DOM nodes and froze the tab for
+  80–112 seconds, on every selection. Capped at 200, with the remainder stated.
+  Measured after the fix on the reviewer's own repro: **826 ms**. Pre-existing,
+  in the function the new code was added to.
+
+- **Record content could author a sentence.** `sub_agent` becomes the subject of
+  the headline, so a value of `operator, not the agent,` rendered "The operator,
+  not the agent, subagent proposed a shell command." Escaped, so never
+  injection — but a forensic pane must not let a record write its own prose.
+  Only an identifier-shaped value is inlined now.
+
+- Verified by execution: 615 unit assertions, fourteen deliberate mutations
+  confirming the assertions that matter actually fail when the behaviour
+  breaks, all 6,715 events explained against the real corpus with no blank
+  section and pair and citation counts agreeing with independent `jq`, 40
+  checks driving real Chrome — including `ROW` measured at exactly 29px in the
+  live DOM and a hostile record whose command is `<img src=x onerror=…>`
+  rendering as text with no node, no handler, and no prototype pollution.
+
 ## Unreleased
 
 Corrections to the public surface, found by re-reading it against the code

@@ -157,6 +157,9 @@
   .note{border-left:2px solid var(--amber);background:rgba(216,162,74,.07);padding:10px 13px;font-size:12px;line-height:1.6;color:var(--dim);border-radius:0 2px 2px 0}
   .note b{color:var(--band);font-weight:600}
   .note .warn{color:var(--amber)}
+  .row .terr{font-style:normal;font-family:var(--mono);font-size:9.5px;color:var(--amber);
+             border:1px solid rgba(216,162,74,.45);border-radius:2px;padding:0 3px;margin-left:6px;
+             vertical-align:1px}
   .note .qual{color:var(--dust);font-weight:400}
   .note .seen{font-family:var(--mono);font-size:11px;color:var(--band);word-break:break-word;white-space:pre-wrap;display:block;margin-top:3px}
   .note ul.ipl{margin:6px 0 0;padding-left:16px}
@@ -357,7 +360,7 @@
   }
   var DEFAULT_SOURCES = ["../records.ndjson","../findings.ndjson","../numbat-baseline.ndjson"];
 
-  var recs=[], view=[], sel=-1, handle=null, bad=0, eidx=null;
+  var recs=[], view=[], sel=-1, handle=null, bad=0, eidx=null, fidx=null, exIndex=null;
   var range=null, kindFilter="", loadToken=0, loading=false, lastDesc=null;
   var paneMode="auto"; // "auto" — record or session rollup; "sessions" — the list
   var sortDesc=true;
@@ -670,6 +673,10 @@
       sev: s(o.severity), rule: s(o.rule_id) || s(o.deny_rule_id),
       agent: s(o.source_agent), etype: s(o.event_type),
       sid: s(o.session_id), eid: s(o.event_id),
+      // The only failure signal these records carry. It was reachable solely by
+      // opening a record, so scanning 1,973 command rows for failures meant
+      // clicking all 1,973.
+      terr: Array.isArray(o.tags) && o.tags.indexOf("tool_error") !== -1,
       desc: desc, raw: raw,
       // free text searches the description too; field queries stay on raw fields
       low: (raw + "\n" + desc).toLowerCase(), o:o, i:idx
@@ -824,20 +831,33 @@
       return cmd ? "Proposed a shell command: " + cmd
                  : (tool ? "Proposed a command via " + tool : "Proposed a shell command");
     if(et === "command.result"){
-      if(ec === 0) return "Command finished successfully";
-      if(ec !== null) return "Command failed (exit " + ec + ")";
+      // Report the code, not a verdict — interpret() and the rollup both
+      // refuse one, and "successfully" is the only place describe() offered it.
+      if(ec !== null) return "Command finished (exit " + ec + ")";
       var ms = dsNum(o.duration_ms);
       // no exit code in the record — report only what it actually says
       return ms !== null ? "Command finished after " + dsDur(ms) : "Command finished";
     }
-    if(et === "file.read")   return fp ? "Read a file: " + fp : "Read a file";
-    if(et === "file.write")  return fp ? "Wrote a file: " + fp : "Wrote a file";
-    if(et === "file.delete") return fp ? "Deleted a file: " + fp : "Deleted a file";
+    // "Read"/"Wrote" assert a completed operation this record cannot establish,
+    // exactly as "Ran" did for command.exec. numbat emits these from the
+    // pre-tool hook — in every pair in the reference corpus the file event
+    // precedes its tool.result — so the record is the request, not the outcome.
+    if(et === "file.read")   return fp ? "Asked to read a file: " + fp : "Asked to read a file";
+    if(et === "file.write")  return fp ? "Asked to write a file: " + fp : "Asked to write a file";
+    if(et === "file.delete") return fp ? "Asked to delete a file: " + fp : "Asked to delete a file";
+    // 107 of the 127 boundary events in the reference corpus belong to a
+    // subagent, not to the session — numbat maps SubagentStart/Stop onto these
+    // types and copies the parent's session_id.
     if(et === "session.start"){
+      var sa = dsTrunc(o.sub_agent, 40);
+      if(sa) return "Subagent started: " + sa;
       var model = dsTrunc(o.model, 40);
       return model ? "Session started on " + model : "Session started";
     }
-    if(et === "session.end") return "Session ended";
+    if(et === "session.end"){
+      var sz = dsTrunc(o.sub_agent, 40);
+      return sz ? "Subagent ended: " + sz : "Session ended";
+    }
     if(et === "prompt.user"){
       var pv = dsTrunc(o.content_preview, 110);
       return pv ? "Operator sent a prompt: " + pv : "Operator sent a prompt";
@@ -1049,6 +1069,482 @@
     }
   }
   /* [interpret:end] */
+
+  /* ═════ explain ═════
+     Per-event interpretation — the event equivalent of interpret(), and the
+     one that matters most by volume: events are 6,715 of the 6,839 records in
+     the reference corpus, and until now they got a one-liner and a JSON dump.
+
+     interpret() is pure over a single record because a finding carries its own
+     rule id and its own observed_* fields. An event carries neither. What it
+     means depends on records beside it: the result that answers it, and the
+     findings that cite it. So explain() takes an index, built once by
+     buildIndex() and passed in — the same shape as rollup() receiving already
+     bucketed sessions, and for the same reason. A closure or a global would
+     let the DOM back into a block that has to stay liftable.
+
+     buildIndex() lives in this block rather than at the call site so the block
+     stays self-contained: the tests lift both together and build fixtures with
+     object literals rather than mocks.
+
+     Two joins, both verified against the reference corpus before being relied
+     on. tool_call_id pairs a call with its result in four shapes, not two:
+       command.exec → command.result   1,960
+       file.write   → tool.result        637
+       file.read    → tool.result        547
+       tool.call    → tool.result         84
+     In all 3,228 pairs the call side precedes the result side in time, with no
+     exceptions — which is why a file.write is reported as a requested write
+     rather than a completed one. 13 execs have no result at all, and 12 of
+     those 13 are mid-session, so a missing result is not truncation and is
+     never rendered as failure.
+
+     cited_event_ids runs finding → event in the file; the reverse index is
+     what lets an event say that it triggered a finding. In this corpus that
+     relation happens to be one-to-one, and nothing here depends on it.
+
+     Same output discipline as interpret(): data, never markup, so esc() stays
+     the single escape point. Never throws, never returns an empty headline,
+     and states only what the record carries. */
+  /* [explain:begin] */
+  function exStr(v){
+    if(v === undefined || v === null) return "";
+    if(typeof v === "string") return v;
+    if(typeof v === "number") return isFinite(v) ? String(v) : "";
+    if(typeof v === "boolean") return String(v);
+    return "";
+  }
+  function exClean(v){ return exStr(v).replace(/\s+/g, " ").trim(); }
+  function exTrunc(v, n){
+    var t = exClean(v);
+    if(t.length <= n) return t;
+    var cut = n - 1;
+    // Never slice between a surrogate pair — that renders as U+FFFD.
+    var c = t.charCodeAt(cut - 1);
+    if(c >= 0xD800 && c <= 0xDBFF) cut--;
+    return t.slice(0, cut) + "…";
+  }
+  function exNum(v){ return (typeof v === "number" && isFinite(v)) ? v : null; }
+  function exInt(v){
+    return (typeof v === "number" && isFinite(v) && Math.floor(v) === v) ? v : null;
+  }
+  // Same cascade describe() uses, so the same span reads the same in both.
+  function exDur(ms){
+    if(ms < 1000) return ms + " ms";
+    if(ms < 60000) return (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + " s";
+    var min = Math.floor(ms / 60000);
+    if(min < 60) return min + " min";
+    return Math.floor(min / 60) + " h " + (min % 60) + " min";
+  }
+  function exTag(o, tag){
+    if(!o || !Array.isArray(o.tags)) return false;
+    for(var i = 0; i < o.tags.length; i++) if(exClean(o.tags[i]) === tag) return true;
+    return false;
+  }
+
+  /* Join keys are record-derived and untrusted. rollup() bounds its keys by
+     truncating them, but a truncated *join* key can fuse two distinct ids into
+     one pair, and a fabricated pair is a worse failure than no pair — so an
+     over-long key is refused entry instead. The longest real tool_call_id in
+     the reference corpus is 30 characters and the longest event_id is 51. */
+  /* Every one of these tables is looked up with a record-supplied event_type,
+     so a bare [] read would let "constructor" or "toString" answer as a known
+     type and gate a whole section on. */
+  function exHas(map, k){ return Object.prototype.hasOwnProperty.call(map, k); }
+
+  // The requesting half of each pair shape.
+  var EX_CALL = { "command.exec":1, "file.read":1, "file.write":1, "file.delete":1, "tool.call":1 };
+
+  var EX_MAXKEY = 200;
+  // Bounds on how much one pathological record can add to the index.
+  var EX_MAXPAIR = 8, EX_MAXCITE = 20, EX_MAXSCAN = 200;
+  function exKey(v){
+    var k = exStr(v);
+    if(!k || k.length > EX_MAXKEY) return "";
+    // Not exClean(): a join key is matched, never displayed, so normalising it
+    // would make "abc" and "abc " the same record — a forged pair costs one
+    // trailing space. It would also desync these keys from the id indexes the
+    // viewer builds over the raw value, silently breaking the jump buttons.
+    // Anything carrying whitespace or a control character is refused instead.
+    return /[\s\u0000-\u001f\u007f]/.test(k) ? "" : k;
+  }
+
+  function buildIndex(records){
+    // Null-prototype maps throughout: every key here comes from a record, and
+    // "__proto__" is a legal string.
+    var pair = Object.create(null), citedBy = Object.create(null), truncated = Object.create(null);
+    var list = Array.isArray(records) ? records : [];
+    for(var i = 0; i < list.length; i++){
+      var o = list[i];
+      if(o === null || typeof o !== "object" || Array.isArray(o)) continue;
+      var rt = exClean(o.record_type);
+
+      if(rt === "event"){
+        var k = exKey(o.tool_call_id);
+        if(!k) continue;
+        if(!pair[k]) pair[k] = [];
+        if(pair[k].length < EX_MAXPAIR) pair[k].push(o); else truncated[k] = 1;
+        continue;
+      }
+
+      if(rt === "finding"){
+        var ids = o.cited_event_ids;
+        if(!Array.isArray(ids)) continue;
+        var note = {
+          finding: exTrunc(o.finding_id, 120),
+          rule:    exTrunc(o.rule_id, 120),
+          title:   exTrunc(o.title, 160),
+          sev:     exTrunc(o.severity, 30)
+        };
+        for(var j = 0; j < ids.length && j < EX_MAXSCAN; j++){
+          var ek = exKey(ids[j]);
+          if(!ek) continue;
+          if(!citedBy[ek]) citedBy[ek] = [];
+          if(citedBy[ek].length < EX_MAXCITE) citedBy[ek].push(note);
+        }
+      }
+    }
+    return { pair: pair, citedBy: citedBy, truncated: truncated };
+  }
+
+  /* The counterpart record sharing this one's tool_call_id. Identity, not
+     equality: a record must never pair with itself.
+
+     Returns whether the counterpart sits earlier in the file as well as what it
+     is. buildIndex() pushes in file order, so position in this list *is* file
+     order — which means the ordering can be checked rather than assumed. It
+     holds for all 3,228 pairs in the reference corpus, but a claim that is true
+     of every file seen so far is still a claim, and this one is cheap to
+     verify. Where it cannot be established, `before` is null and the caller
+     makes no ordering claim at all. */
+  /* The counterpart record sharing this one's tool_call_id.
+
+     Three things this must not do, each of which it did in an earlier draft:
+     pair a record with itself (identity, not equality); pick an arbitrary
+     member of the group when several share a key and then name it with full
+     confidence; or assert file ordering it never checked. buildIndex() pushes
+     in file order, so position in this list IS file order and the ordering can
+     be verified — it holds for all 3,228 pairs in the reference corpus, but a
+     claim true of every file seen so far is still a claim.
+
+     `want` is the type the caller expects on the other side, so the right mate
+     is chosen rather than the first one. `ambiguous` is set when more than one
+     other record shares the key, so the caller can decline to name any of them
+     instead of guessing. */
+  function exPairOf(o, index, want, callSide){
+    var k = exKey(o.tool_call_id);
+    if(!k) return null;
+    var m = (index && typeof index === "object" && index.pair &&
+             typeof index.pair === "object") ? index.pair : null;
+    if(!m || !Object.prototype.hasOwnProperty.call(m, k)) return null;
+    var list = m[k];
+    if(!Array.isArray(list)) return null;
+
+    var self = -1, others = [], i;
+    for(i = 0; i < list.length; i++){
+      if(list[i] === o && self === -1) self = i;
+      else others.push(i);
+    }
+    if(!others.length) return null;
+
+    // Prefer a counterpart of the expected shape over merely the first one.
+    var pick = -1;
+    for(i = 0; i < others.length; i++){
+      var t = exClean(list[others[i]].event_type);
+      if(callSide ? exHas(EX_CALL, t) : (want && t === want)){ pick = others[i]; break; }
+    }
+    if(pick === -1) pick = others[0];
+    var tr = (index && typeof index === "object" && index.truncated &&
+              typeof index.truncated === "object" &&
+              Object.prototype.hasOwnProperty.call(index.truncated, k));
+    return { rec: list[pick],
+             before: (self === -1) ? null : (pick < self),
+             ambiguous: others.length > 1,
+             truncated: !!tr };
+  }
+  function exCitedBy(o, index){
+    var k = exKey(o.event_id);
+    if(!k) return [];
+    var m = (index && typeof index === "object" && index.citedBy &&
+             typeof index.citedBy === "object") ? index.citedBy : null;
+    if(!m || !Object.prototype.hasOwnProperty.call(m, k)) return [];
+    var list = m[k];
+    return Array.isArray(list) ? list : [];
+  }
+
+  // Which event types are the answering half of a pair, and what each half
+  // expects to find on the other side.
+  var EX_WANT = {
+    "command.exec":   "command.result",
+    "file.read":      "tool.result",
+    "file.write":     "tool.result",
+    "tool.call":      "tool.result",
+    "command.result": "command.exec"
+  };
+  var EX_ISRESULT = { "command.result":1, "tool.result":1 };
+
+  function explain(o, index){
+    try {
+      if(o === null || typeof o !== "object" || Array.isArray(o)) return null;
+      if(exClean(o.record_type) !== "event") return null;
+
+      var et   = exClean(o.event_type);
+      var tool = exTrunc(o.tool_name, 40);
+      var path = exTrunc(o.file_path, 200) || exTrunc(o.observed_file_path, 200);
+      var sub  = exTrunc(o.sub_agent, 80);
+      var dur  = exNum(o.duration_ms);
+
+      /* 1 — what this is. Plain statement of the action, and only the action:
+             the command, the path and the payload all render below this
+             section already, so repeating them here would push the parts an
+             operator cannot get anywhere else off the screen. */
+      // Who acted. The summary line above this pane already says what happened;
+      // what it never says is which of the session's agents did it, and 61% of
+      // records in the reference corpus carry a sub_agent. Naming it here makes
+      // the headline carry something the operator cannot read anywhere else,
+      // and retires a caveat bullet that used to say it in 174 characters.
+      // Only an identifier-shaped value is inlined; anything else is named
+      // generically and left to the raw record below, where it cannot be read
+      // as part of the sentence.
+      var subName = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,60}$/.test(sub) ? sub : "";
+      var who = subName ? "The " + subName + " subagent" : (sub ? "A subagent" : "The agent");
+
+      var what;
+      if(et === "command.exec"){
+        // "Proposed", not "ran" — on the hook path numbat sees the command
+        // before it executes, and whether it executed is the result's business.
+        what = who + " proposed a shell command" + (tool ? " through " + tool : "") + ".";
+      } else if(et === "command.result"){
+        what = "numbat recorded a result for a shell command" +
+               (dur !== null ? ", reporting a duration of " + exDur(dur) : "") + ".";
+      } else if(et === "file.read"){
+        what = path ? who + " asked to read " + path + (tool ? " using " + tool : "") + "."
+                    : who + " asked to read a file.";
+      } else if(et === "file.write"){
+        what = path ? who + " asked to write " + path + (tool ? " using " + tool : "") + "."
+                    : who + " asked to write a file.";
+      } else if(et === "file.delete"){
+        what = path ? who + " asked to delete " + path + (tool ? " using " + tool : "") + "."
+                    : who + " asked to delete a file.";
+      } else if(et === "tool.call"){
+        what = tool ? who + " called the " + tool + " tool." : who + " called a tool.";
+      } else if(et === "tool.result"){
+        what = (tool ? "The " + tool + " tool returned." : "A tool returned.");
+        // Verbatim-identical to the row summary otherwise, on every one of the
+        // 1,268 tool.result records in the reference corpus. What it can add is
+        // the absence an operator would otherwise go looking for in the JSON.
+        if(!exClean(o.content_preview) && !exClean(o.command) && !exClean(o.file_path))
+          what += " This record marks the return; it does not carry what was returned.";
+      } else if(et === "session.start" || et === "session.end"){
+        var edge = (et === "session.start") ? "start" : "end";
+        if(sub)
+          // numbat maps SubagentStart/Stop onto the session boundary events and
+          // copies the parent's session_id, so this is not the session's own edge.
+          what = "numbat recorded the " + edge + " of a subagent" +
+                 (subName ? " (" + subName + ")" : "") + ", which it maps onto " + et + ".";
+        else {
+          var model = exTrunc(o.model, 60);
+          what = "numbat recorded " + (edge === "start" ? "a start" : "an end") +
+                 " for this session" + (model ? ", on model " + model : "") + ".";
+        }
+      } else if(et === "prompt.user"){
+        what = "The operator sent a prompt to the agent.";
+      } else if(et === "message.assistant"){
+        what = who + " sent a message.";
+      } else if(et === "permission.requested"){
+        what = tool ? who + " asked for approval to use the " + tool + " tool."
+                    : who + " asked for approval to use a tool.";
+      } else if(et){
+        what = "numbat recorded a " + exTrunc(et, 60) + " event.";
+      } else {
+        what = "numbat recorded an event with no event_type.";
+      }
+
+      /* 2 — the other half of the pair, or the absence of one stated plainly.
+             Event types that carry no tool_call_id get no section at all: there
+             is nothing that could be missing, and an absence note would invent
+             a gap the schema never had. */
+      var next = null;
+      var want = exHas(EX_WANT, et) ? EX_WANT[et] : "";
+      var isResult = exHas(EX_ISRESULT, et);
+      if(want || isResult){
+        var rawKey = exClean(o.tool_call_id);
+        var usable = !!exKey(o.tool_call_id);
+        // The noun the outcome sentence hangs on: a shell command, or a tool call.
+        var noun = (et === "command.exec" || et === "command.result") ? "command" : "call";
+
+        if(!rawKey){
+          // No join key at all. That is not the same fact as "no result was
+          // recorded", and reporting it as one invented an absence.
+          next = { label: "What happened next", warn: false, eventId: "",
+                   text: "This record carries no tool_call_id, so it cannot be matched to " +
+                         "its other half in either direction." };
+        } else if(!usable){
+          // Refused by the index, not missing from the file. Saying "does not
+          // appear in this file" about a record sitting two rows away would be
+          // a fabricated absence — the exact failure the key guard exists to avoid.
+          next = { label: "What happened next", warn: false, eventId: "",
+                   text: "This record's tool_call_id is not in a form this viewer will match on, so it " +
+                         "was not matched. That is a limit of this viewer, not an absence from the file." };
+        } else {
+          var pair = exPairOf(o, index, isResult ? "" : want, isResult);
+          var mate = pair ? pair.rec : null;
+          // Only claim "earlier" when file order actually shows it.
+          var where = pair && pair.before === true ? " recorded earlier in this file"
+                    : (mate ? " in this file" : "");
+          // Name the type that was FOUND, never the type that was wanted.
+          var mateType = mate ? (exTrunc(mate.event_type, 40) || "record") : "";
+
+          // tool_error is the only failure signal these records carry, and what
+          // it is worth depends on where the record came from.
+          function exErrNote(r){
+            return (exClean(r.source_type) === "otel")
+              ? " It is tagged tool_error, which numbat sets from the agent's own failure marker or, on telemetry records, from log severity."
+              : " It is tagged tool_error, which numbat sets only from a field the agent itself used to mark failure.";
+          }
+
+          if(isResult){
+            var txt, noun2;
+            if(mate){
+              // The verb belongs to the MATE's type, not this record's: naming a
+              // command.result as the record "where the command was proposed"
+              // asserts a proposal that record never made.
+              noun2 = (exClean(mate.event_type) === "command.exec") ? "command" : "call";
+              txt = "This is the result of a matching " + mateType + where +
+                    ", where the " + noun2 + " was " +
+                    (noun2 === "command" ? "proposed" : "requested") + ".";
+              var mp2 = exTrunc(mate.file_path, 200);
+              if(mp2) txt += " It targeted " + mp2 + ".";
+              if(pair.ambiguous)
+                txt += " Several records share this tool_call_id, so which one this answers cannot be determined from this file.";
+              if(pair.truncated)
+                txt += " More records share it than this viewer indexes, so the one named here may not be the right one.";
+            } else {
+              txt = "No " + (want || "requesting event") +
+                    " carrying this tool_call_id appears in this file, so the event that " +
+                    "asked for this is missing from it.";
+            }
+            var selfErr = exTag(o, "tool_error");
+            if(selfErr) txt += exErrNote(o);
+            next = { label: "What this responds to", text: txt, warn: selfErr,
+                     eventId: mate ? exKey(mate.event_id) : "" };
+          } else if(mate){
+            var md = exNum(mate.duration_ms);
+            var t2 = "A matching " + mateType + " was recorded" +
+                     (md !== null ? ", reporting a duration of " + exDur(md) : "") + ".";
+            // exit_code is accepted as any finite number so this cannot deny a
+            // field describe() would happily render.
+            var xc = exNum(mate.exit_code), mErr = exTag(mate, "tool_error");
+            if(xc !== null) t2 += " It reports exit code " + xc + ".";
+            // Emitted unconditionally when the tag is present, so the renderer's
+            // badge below can never appear without the sentence explaining it.
+            if(mErr) t2 += exErrNote(mate);
+            if(xc === null && !mErr)
+              // The absence of an outcome field is itself the finding here. No
+              // record in the reference corpus carries an exit code at all.
+              t2 += " It carries no exit code, so whether the " + noun +
+                    " succeeded is not recorded here.";
+            if(pair.ambiguous)
+              t2 += " Several records share this tool_call_id, so which one answers this cannot be determined from this file.";
+            if(pair.truncated)
+              t2 += " More records share it than this viewer indexes, so the one named here may not be the right one.";
+            // The renderer's badge is driven by this flag, so it may only be set
+            // when the sentence explaining it was actually emitted.
+            next = { label: "What happened next", text: t2, warn: mErr,
+                     eventId: exKey(mate.event_id) };
+          } else {
+            next = { label: "What happened next", warn: false, eventId: "",
+                     text: "No " + want + " carrying this tool_call_id appears in this file, " +
+                           "so no result was recorded. That does not show the " + noun +
+                           " failed, and " + (et === "command.exec"
+                             ? "it does not show it ran." : "it does not show it completed.") };
+          }
+        }
+      }
+
+      /* 3 — findings that cite this event. finding → event is the only
+             direction the file carries; this is the reverse. */
+      var findings = [], cited = exCitedBy(o, index);
+      for(var c = 0; c < cited.length; c++){
+        var n = cited[c];
+        if(n && typeof n === "object")
+          findings.push({ finding: n.finding || "", rule: n.rule || "",
+                          title: n.title || "", sev: n.sev || "" });
+      }
+
+      /* 4 — a closed set of conditions, each stating what this record does and
+             does not establish. Every entry is gated on a field that is
+             actually present, and the wording is interpret()'s wherever the
+             same condition applies, so the two panes cannot disagree. */
+      var limits = [];
+      var src = exClean(o.source_type);
+
+      if(src === "hook"){
+        if(et === "command.exec")
+          limits.push("numbat saw this before it ran — this record does not show whether it executed.");
+        else if(et === "file.write")
+          limits.push("numbat recorded this when the agent requested the write — this record does not show whether the write completed.");
+        else if(et === "file.read")
+          limits.push("numbat recorded this when the agent requested the read — this record does not show whether the read completed.");
+        else if(et === "file.delete")
+          limits.push("numbat recorded this when the agent requested the deletion — this record does not show whether the file was deleted.");
+        else if(et === "tool.call")
+          limits.push("numbat recorded this when the agent made the call — this record does not show whether the call completed.");
+      } else if(src === "artifact"){
+        limits.push("Reconstructed from an on-disk artifact after the fact — this record makes no claim about when numbat saw it.");
+      } else if(src === "otel"){
+        limits.push("Reported by telemetry — this record does not show that numbat saw it before it ran.");
+      }
+
+      /* actor is a classification convention, not an observation: numbat stamps
+         hook events as "assistant" by construction. The claim is specifically
+         that this was a tool call, so it may only be made about a tool call —
+         a message.assistant carries actor "assistant" and is not one. */
+      var actor = exClean(o.actor);
+      var isCall = (et === "command.exec" || et === "file.read" || et === "file.write" ||
+                    et === "file.delete" || et === "tool.call");
+      if(actor === "assistant" && isCall)
+        limits.push("The agent issued this tool call itself — which does not mean the operator did not ask for it or approve it.");
+      else if(actor === "user")
+        limits.push("This came from the operator, not the agent.");
+
+      // The headline already names the subagent; this only has to say where
+      // numbat files its records, and it used to take 174 characters to do it.
+      if(sub)
+        limits.push("numbat files subagent work under the parent's session_id, so this belongs to the session above rather than one of its own.");
+
+      if(et === "permission.requested"){
+        // "asked" is the marker that a decision was requested, not a decision.
+        // Announcing it as one and then saying the answer is unrecorded
+        // contradicts itself inside two clauses.
+        var dec = exTrunc(o.decision, 40) || exTrunc(o.approval_decision, 40);
+        var pending = !dec || dec === "asked" || dec === "ask" || dec === "requested" || dec === "pending";
+        limits.push(pending
+          ? "This record shows approval was requested. It does not record what was answered."
+          : "The record marks the approval decision “" + dec + "”.");
+      }
+
+      /* confidence deliberately gets no line here. It is a definition of a
+         field, not a property of this record, and this section is for what the
+         record does and does not establish. It also does not vary: every one of
+         the 6,715 events in the reference corpus is "medium", so a bullet
+         explaining it appeared on 100% of panes, always last, and was a quarter
+         of all the text this function produced. A constant in the position
+         where the rare real caveat lives teaches the eye to skip the section.
+         The value is still on screen as a header tag, and interpret() explains
+         the concept where it actually varies. */
+
+      if(o.redacted === true)
+        limits.push("At least one value on this record was masked before the record was written — not necessarily the one shown above.");
+
+      return { what: what, next: next, findings: findings, limits: limits };
+    } catch(e){
+      // A record that defeats every guard above still gets a pane.
+      return { what: "numbat recorded an event this viewer could not read.",
+               next: null, findings: [], limits: [] };
+    }
+  }
+  /* [explain:end] */
 
   /* ═════ rollup ═════
      What one session did, derived from its own records. Same discipline as
@@ -1393,7 +1889,7 @@
   function finish(desc, parsed, nBad, token, resetState, after){
     if(token !== loadToken){ loading = false; prog.hidden = true; return; }
     loading = false;
-    recs = parsed; bad = nBad; eidx = null; lastDesc = desc;
+    recs = parsed; bad = nBad; eidx = null; fidx = null; exIndex = null; lastDesc = desc;
     // recs was replaced wholesale, so every cached rollup is stale. Live
     // polling re-parses every few seconds and a running session's counts must
     // move with it.
@@ -1618,7 +2114,9 @@
       '<span class="ts">'+(r.tms?esc(fmtHMS(r.tms)):(r.ts?esc(r.ts.slice(11,19)):"—"))+'</span>'+
       '<span class="kd k-'+cls(r.rt)+'">'+esc(r.rt)+'</span>'+
       '<span class="ag">'+esc(r.agent||"—")+'</span>'+
-      '<span class="bd"><strong>'+body+'</strong>'+ev+'</span></div>';
+      '<span class="bd"><strong>'+body+'</strong>'+ev+
+      (r.terr?'<i class="terr" title="tagged tool_error — the agent marked this one failed">tool_error</i>':'')+
+      '</span></div>';
   }
   function mark(html,term){
     try { return html.replace(new RegExp("("+term.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+")","ig"),"<mark>$1</mark>"); }
@@ -1683,6 +2181,54 @@
       h+='<div class="ipsec"><b>What this record does and does not establish</b><ul class="ipl">';
       for(var i=0;i<ip.limits.length;i++) h+='<li>'+esc(ip.limits[i])+'</li>';
       h+='</ul></div>';
+    }
+    return h+'</div>';
+  }
+
+  /* Render an event explanation. Same contract as ipRender(): explain()
+     returns data only, so every string it produced goes through esc() here and
+     esc() stays the single escape point.
+
+     Length is deliberate. An event's explanation sits above a raw command
+     block and a full JSON dump, and a command.result carries one useful fact —
+     so a section is omitted when the record has nothing to put in it rather
+     than padded to a uniform shape. */
+  function exRender(ex){
+    if(!ex) return "";
+    var h = '<span class="lbl">explanation</span><div class="note">';
+    h += '<div class="ipsec"><b>What this is</b><br>'+esc(ex.what)+'</div>';
+
+    if(ex.next){
+      h += '<div class="ipsec"><b>'+esc(ex.next.label)+'</b>'+
+           (ex.next.warn ? ' <span class="warn">— the agent marked this one failed</span>' : '')+
+           '<br>'+esc(ex.next.text);
+      // The pair is already located; describing a record the operator then has
+      // to go and find by hand wastes the lookup. Findings link to their cited
+      // events the same way.
+      if(ex.next.eventId){
+        var pt = findEid(ex.next.eventId);
+        if(pt >= 0) h += '<button type="button" class="btn jump" data-t="'+pt+'" title="'+esc(ex.next.eventId)+'">→ '+esc(ex.next.eventId)+'</button>';
+      }
+      h += '</div>';
+    }
+
+    if(ex.findings.length){
+      h += '<div class="ipsec"><b>Related findings</b> <span class="qual">— this event is cited by '+
+           esc(ex.findings.length)+' finding'+(ex.findings.length===1?'':'s')+'</span>';
+      for(var i=0;i<ex.findings.length;i++){
+        var f = ex.findings[i], t = findFid(f.finding);
+        var label = (f.sev ? f.sev+' · ' : '')+(f.rule || f.finding || 'finding')+
+                    (f.title ? ' — '+f.title : '');
+        h += '<button type="button" class="btn jump" data-t="'+(t>=0?t:"")+'" title="'+esc(label)+'"'+
+             (t<0?' disabled':'')+'>'+(t>=0?"→ ":"✕ ")+esc(label)+'</button>';
+      }
+      h += '</div>';
+    }
+
+    if(ex.limits.length){
+      h += '<div class="ipsec"><b>What this record does and does not establish</b><ul class="ipl">';
+      for(var j=0;j<ex.limits.length;j++) h += '<li>'+esc(ex.limits[j])+'</li>';
+      h += '</ul></div>';
     }
     return h+'</div>';
   }
@@ -2078,7 +2624,20 @@
   function showDetail(r){
     if(!r) return;
     var o=r.o,h="";
-    h+='<div class="dhead"><h2>'+esc(r.rule||r.etype||r.rt)+'</h2>';
+    h+='<div class="dhead">';
+    /* Session context has to survive record selection. Narrowing to a session
+       and clicking any row used to discard the rollup outright, and the only
+       way back was the isolate button inside whichever record happened to be
+       clicked — which reads as "the feature is missing", not "you navigated
+       away from it". A return affordance in the header is the cheaper of the
+       two fixes: persisting the whole rollup above every record would push the
+       explanation this pane exists to show below the fold on every selection,
+       and cost a rollup render per arrow-key press. This is one line, always in
+       the same place, and it only appears when there is a session to go back to. */
+    var loneSid=loneSession();
+    if(loneSid)
+      h+='<button type="button" class="btn lnk" id="backSess" title="Back to the summary for this session">← session '+esc(loneSid)+' summary</button>';
+    h+='<h2>'+esc(r.rule||r.etype||r.rt)+'</h2>';
     h+='<p class="dsum">'+esc(r.desc)+'</p><div class="dmeta">';
     h+=tag(r.rt,r.rt==="finding"?"hi":r.rt==="indicator"?"ok":"");
     if(r.sev) h+=tag(r.sev,(r.sev==="high"||r.sev==="critical")?"hi":r.sev==="medium"?"wa":"");
@@ -2093,16 +2652,27 @@
     if(o.title) h+='<span class="lbl">title</span><div style="font-size:13.5px;line-height:1.55">'+esc(s(o.title))+'</div>';
     if(o.description) h+='<span class="lbl">description</span><div style="font-size:12.5px;line-height:1.6;color:var(--dim)">'+esc(s(o.description))+'</div>';
     if(r.rt==="finding") h+=ipRender(interpret(o,RULECAT));
+    else if(r.rt==="event") h+=exRender(explain(o,eventIndex()));
     var cmd=s(o.command)||s(o.observed_command)||s(o.content_preview)||s(o.url)||s(o.file_path)||s(o.observed_file_path)||s(o.message);
     if(cmd) h+='<span class="lbl">observed</span><div class="cmd">'+esc(cmd)+'</div>';
     if(Array.isArray(o.cited_event_ids)&&o.cited_event_ids.length){
-      h+='<span class="lbl">cited events · '+o.cited_event_ids.length+'</span>';
-      for(var c=0;c<o.cited_event_ids.length;c++){
+      // Capped, and the cap is stated. This loop is driven straight off record
+      // content and used to be unbounded: a finding citing 2,000,000 events —
+      // a 24 MB file, well under the size guard — built two million buttons and
+      // wired a listener to each, freezing the tab for over a minute, and it
+      // re-ran on every arrow-key press past the record. buildIndex() already
+      // bounds the same list at EX_MAXSCAN; the renderer did not.
+      var nCite=o.cited_event_ids.length, CITECAP=200;
+      h+='<span class="lbl">cited events · '+esc(nCite)+'</span>';
+      for(var c=0;c<nCite&&c<CITECAP;c++){
         var id=s(o.cited_event_ids[c]),t=findEid(id);
         h+='<button type="button" class="btn jump" data-t="'+(t>=0?t:"")+'"'+
            (t<0?' disabled title="Not in this file — recapture with --emit all"':'')+'>'+
            (t>=0?"→ ":"✕ ")+esc(id)+'</button>';
       }
+      if(nCite>CITECAP)
+        h+='<div class="ruline">Showing the first '+esc(CITECAP)+' of '+esc(nCite)+
+           ' cited events. The rest are in the full record below.</div>';
     }
     if(Array.isArray(o.tags)&&o.tags.length){
       h+='<span class="lbl">tags</span><div class="dmeta">';
@@ -2129,6 +2699,12 @@
       sel=-1; paneMode="auto";
       syncStats(); listwrap.scrollTop=0; apply();
     });
+    // Dropping the selection is what hands the pane back to the rollup:
+    // refreshPane() summarises a lone session whenever no record is selected.
+    var bk=$("backSess");
+    if(bk) bk.addEventListener("click",function(){
+      sel=-1; paneMode="auto"; paint(); refreshPane();
+    });
     var cj=$("cpJson"),cl=$("cpLine");
     if(cj) cj.addEventListener("click",function(){ copy(safeStr(o),"JSON copied"); });
     if(cl) cl.addEventListener("click",function(){ copy(r.raw,"Raw line copied"); });
@@ -2148,6 +2724,33 @@
     if(!id) return -1;
     if(!eidx){ eidx=Object.create(null); for(var i=0;i<recs.length;i++) if(recs[i].eid) eidx[recs[i].eid]=recs[i].i; }
     return (id in eidx)?eidx[id]:-1;
+  }
+  /* finding_id → row, so an event can link back to the findings that cite it.
+     mkRec keeps event_id but not finding_id, and adding a field to every record
+     to serve nine of them would be the wrong trade — this reads through to the
+     parsed object instead, and is built once on first use like eidx. */
+  function findFid(id){
+    if(!id) return -1;
+    if(!fidx){
+      fidx=Object.create(null);
+      for(var i=0;i<recs.length;i++){
+        var f=recs[i].o&&recs[i].o.finding_id;
+        if(typeof f==="string"&&f&&!(f in fidx)) fidx[f]=recs[i].i;
+      }
+    }
+    return (id in fidx)?fidx[id]:-1;
+  }
+  /* The sibling index explain() needs. Built once on first use and thrown away
+     with the records, the same as eidx and rollupCache — live polling replaces
+     recs wholesale every few seconds and a stale pair index would report a
+     result that is no longer in the file. */
+  function eventIndex(){
+    if(!exIndex){
+      var raw=new Array(recs.length);
+      for(var i=0;i<recs.length;i++) raw[i]=recs[i].o;
+      exIndex=buildIndex(raw);
+    }
+    return exIndex;
   }
   function jumpTo(i){
     if(isNaN(i)||i<0||i>=recs.length){ toast("Target record not found",true); return; }

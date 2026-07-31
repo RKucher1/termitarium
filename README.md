@@ -20,14 +20,14 @@ will move; check \`CHANGELOG.md\` for the version this tracks.
 
 | | |
 |---|---|
-| `viewer/viewer.html` | Single-file record viewer: plain-language descriptions, per-finding interpretation, session rollups, virtual scrolling, query language, timeline scrubbing, cited-event resolution |
+| `viewer/viewer.html` | Single-file record viewer: plain-language descriptions, per-event explanation, per-finding interpretation, session rollups, virtual scrolling, query language, timeline scrubbing, cited-event resolution in both directions |
 | `numbatd/main.go` | ~190-line Go server: serves the viewer and its icon from `-tools`, and whitelisted `*.ndjson` from `-dir`, over loopback only |
 | `numbatd/go.mod` | Module definition — Go 1.16+ refuses to build outside a module, so the tree cannot be built without it |
 | `prune/numbat-prune` | Retention tool: archive-before-delete, atomic replace, never loses a record |
 | `install.sh` | Per-user install, builds the binary, wires launchd |
 | `tools/gen-rule-catalog.js` | Maintainer tool: regenerates the viewer's embedded rule catalog from numbat's rule YAML. Never needed at runtime |
 | `tools/gen-favicon.py` | Maintainer tool: regenerates `viewer/favicon.png` from the same geometry as the SVG |
-| `test/viewer-logic.js` | Unit tests for the viewer's description, interpretation and session-rollup logic — `node test/viewer-logic.js`, no dependencies |
+| `test/viewer-logic.js` | Unit tests for the viewer's description, explanation, interpretation and session-rollup logic — `node test/viewer-logic.js`, no dependencies |
 | `test/install-logic.sh` | Tests for `install.sh`: legacy migration, idempotency, uninstall — `bash test/install-logic.sh` |
 
 ## Install
@@ -77,6 +77,14 @@ streaming it live.
   claiming success, and a `command.exec` says *proposed* rather than *ran*
   because on the hook path numbat sees the command before it executes — whether
   it ran is `command.result`'s business, and the two are not always paired.
+  The same applies to files: numbat emits `file.read`/`file.write` from the
+  pre-tool hook, and in every pair in the reference corpus the file event
+  precedes its result, so the row says *asked to write* rather than *wrote*.
+  Boundary events say *subagent started* when they carry a `sub_agent`, because
+  107 of the 127 in the reference corpus are a subagent's, not the session's.
+  A record tagged `tool_error` is marked in the row itself — it is the only
+  failure signal these records carry, and it used to be reachable only by
+  opening each record in turn.
 - **Sort order** — newest first by default; toggle with the button in the query
   bar or `s`. Records with no parseable timestamp always sort to the bottom, in
   file order, in both directions. The timeline stays chronological regardless.
@@ -89,8 +97,10 @@ streaming it live.
   unprefixed is free text over the raw line *and* the description.
 - **Timeline** — density plot with findings overlaid; drag to filter to a time
   window.
-- **Cited events** — findings resolve `cited_event_ids` into jump buttons, so a
-  sequence match is two clicks from the commands behind it.
+- **Cited events, both ways** — findings resolve `cited_event_ids` into jump
+  buttons, so a sequence match is two clicks from the commands behind it; and
+  the events themselves carry the reverse link, so an action that triggered a
+  finding says so instead of leaving that fact visible only from the finding.
 - **Session rollup** — narrow the view to one session and the detail pane
   summarizes it instead of showing the placeholder. Findings come first, each
   with its title, severity, and the file or command it fired on; then commands
@@ -101,7 +111,9 @@ streaming it live.
   **⧉ Browse sessions** lists every session in the file — agent, span, commands
   proposed, findings, lifecycle, and its opening prompt — and clicking one
   isolates it. Rollups are computed on demand and cached, never for every
-  session up front.
+  session up front. Selecting a record inside an isolated session does not
+  discard the summary: the pane header keeps a labelled way back to it, so
+  reading one command does not cost you the session you were reading it in.
 
   What it will not tell you is whether the session *succeeded*. numbat's schema
   defines an optional `exit_code`, but no record in the reference corpus
@@ -156,6 +168,74 @@ The installer tests run against a sandbox `HOME` **and** override the launchd
 labels, because `launchctl` is not scoped by `HOME` — without fake labels a
 test running `--uninstall` would unload the agents on the developer's own
 machine.
+
+### Per-event explanation
+
+Findings are the rare record. Events are 6,715 of the 6,839 in the reference
+corpus, and selecting one shows the same four-part treatment a finding gets:
+what this is, what happened next, any findings that cite it, and what the
+record does and does not establish. Like the finding interpretation it is
+computed locally and deterministically — no model call, no network.
+
+A finding explains itself from its own fields and the embedded rule catalog. An
+event has neither, so most of what an event means comes from the records beside
+it. Two joins carry that weight, and both are built once when the file is
+parsed rather than rediscovered per record.
+
+**Its result.** `tool_call_id` pairs a call with its result in four shapes, not
+the two the schema reading suggests: `command.exec`→`command.result`,
+`file.write`→`tool.result`, `file.read`→`tool.result`, and
+`tool.call`→`tool.result`. A `tool.result` usually answers a *file* event, not
+a `tool.call`. Where a pair exists the pane reports the duration the result
+carries; where one does not, it says so — *no result was recorded* — and states
+in the same breath that this shows neither failure nor execution. In the
+reference corpus 13 of 1,973 proposed commands have no result, and 12 of those
+13 are mid-session, so a missing result is not a truncated file.
+
+**Findings that cite it.** `cited_event_ids` only runs finding→event in the
+file. The viewer builds the reverse index, so an event can say *this action
+triggered a finding*, name the rule, and link to it — the mirror of the jump
+buttons a finding already offers. Nothing assumes the relation is one-to-one,
+though it happens to be in this corpus.
+
+Where a pair is found, the paired record is a jump button, not just a sentence
+about a record you then have to go and find.
+
+The same refusal to imply success applies here as everywhere else. No record in
+the reference corpus carries an `exit_code` at all, so a result reports its
+duration and the pane says plainly that whether the command succeeded is not
+recorded. The one real failure signal is the `tool_error` tag, and it is
+attributed to the agent that set it rather than presented as a verdict — and on
+a telemetry-sourced record, where the tag can come from log severity instead,
+the weaker wording is used.
+
+Three absences are kept distinct, because collapsing them would be a lie in a
+forensic tool: a record with no `tool_call_id` *cannot* be matched; a record
+whose `tool_call_id` this viewer declines to index is a limit of the viewer,
+not an absence from the file; and a record whose counterpart genuinely is not
+present is the only one reported as missing. Where several records share one
+key the pane declines to name any of them rather than guessing, and where more
+share it than the index holds, it says the one it named may be the wrong one.
+
+Join keys are matched exactly and refused if they carry whitespace or a control
+character — normalising them would let `abc` and `abc ` pair, so forging a
+pairing would cost one trailing space. Record content never authors a sentence:
+`sub_agent` is inlined only when it is identifier-shaped, because it becomes the
+subject of the headline.
+
+What the section does **not** carry is a definition of `confidence`. It is a
+property of the field, not of the record, and it does not vary — every event in
+the reference corpus is `medium`. As the last bullet on every pane it was a
+quarter of all the text here, and a constant in the position where the rare
+real caveat lives teaches the eye to skip the section. The value is still on
+screen as a header tag.
+
+Ordering claims are made only where the corpus supports them. In all 3,228
+pairs the call side precedes the result side, without exception, which is why a
+`file.write` is reported as a *requested* write rather than a completed one —
+the same correction `command.exec` already received. Every bullet in the
+closing section is gated on a field that is actually present; where a field is
+missing the line is omitted rather than guessed.
 
 ### Per-finding interpretation
 
