@@ -320,8 +320,8 @@
 
       <div class="lane">
         <span class="lane-tag">otlp</span>
-        <div class="chip" style="animation-delay:-1.9s">prompt.user — 412 tokens</div>
-        <div class="chip" style="animation-delay:-6.2s">command.result — exit 0</div>
+        <div class="chip" style="animation-delay:-1.9s">prompt.user — “run the test suite”</div>
+        <div class="chip" style="animation-delay:-6.2s">command.result — 43 ms</div>
         <div class="chip flags" style="animation-delay:-9.6s">network.indicator — 169.254.169.254</div>
       </div>
 
@@ -329,7 +329,7 @@
         <span class="lane-tag">at rest</span>
         <div class="chip" style="animation-delay:-3.1s">session.start — silicon-hills-platform</div>
         <div class="chip" style="animation-delay:-7.4s">file.write — route.js</div>
-        <div class="chip" style="animation-delay:-10.5s">config.change — settings.json</div>
+        <div class="chip" style="animation-delay:-10.5s">file.write — .claude/settings.json</div>
       </div>
     </div>
     <div class="scanner-foot">
@@ -499,7 +499,7 @@ numbat hook install --agent claude --emit all
 numbat hook status --agent claude
 
 <span class="c"># now do something in Claude Code, then:</span>
-tail -f ~/.numbat/records.ndjson | jq -c '{t:.timestamp, k:.record_type, a:.source_agent, r:.rule_id}'</pre>
+tail -f ~/.numbat/records.ndjson | jq -c '{t:.timestamp, k:.record_type, e:.event_type, a:.source_agent, r:(.rule_id // empty)}'</pre>
       </div>
     </div>
 
@@ -531,7 +531,7 @@ numbat hook install --agent claude --emit all \
 <section id="logs">
   <div class="wrap">
     <div class="eyebrow">Where the logs live</div>
-    <h2 class="sec-title">One NDJSON stream. Five record types. Click a field.</h2>
+    <h2 class="sec-title">One NDJSON stream. Six record types. Click a field.</h2>
     <p class="sec-lede">Default paths sit under <code>~/.numbat/</code>: <code>findings.ndjson</code> if you only asked for findings, <code>records.ndjson</code> once you add events or indicators. numbat never rotates these files — retention is yours. Below is a finding of the shape you'd get if an agent read a secrets file and then proposed an upload.</p>
 
     <div class="anatomy">
@@ -589,7 +589,7 @@ numbat hook install --agent claude --emit all \
     <div class="rules" id="rules"></div>
 
     <div class="callout">
-      <p><strong>Expect noise on your boxes specifically.</strong> An autonomous fleet running with reduced approval modes will trip <code>tamper.guardrails_off</code> and <code>exec.agent_runtime_bypass_flags</code> constantly. Governance work that edits hooks and settings trips <code>tamper.agent_config_write</code>. Baseline with a full <code>scan</code> first, see what fires against normal operation, then decide which rules to disable by ID before you ever consider enforce mode.</p>
+      <p><strong>Expect noise on your boxes specifically.</strong> An autonomous fleet running with reduced approval modes will trip <code>tamper.guardrails_off</code> and <code>exec.agent_runtime_bypass_flags</code> constantly. Governance work that edits hooks and settings trips <code>tamper.agent_config_write</code>. Anything that writes into <code>$HOME/.numbat</code> trips <code>tamper.detector_state_write</code> — including your own tooling, if you deploy into that directory. Six of the nine findings on this author’s machine were his own deploys; keep companion tooling out of the watched directory rather than suppressing the rule. Baseline with a full <code>scan</code> first, see what fires against normal operation, then decide which rules to disable by ID before you ever consider enforce mode.</p>
     </div>
   </div>
 </section>
@@ -643,7 +643,7 @@ env NUMBAT_HTTP_TOKEN=$TOKEN numbat ship \
 
     <div class="limits">
       <div class="limit">
-        <h3>It's two days old</h3>
+        <h3>It shipped on 29 July 2026</h3>
         <p>First public release landed 29 July 2026 at v0.1.1. Record schema is 0.2.0 and will move. Treat anything you build on the record shape as pinned to a version, and expect the rule catalog to churn.</p>
       </div>
       <div class="limit">
@@ -724,7 +724,7 @@ env NUMBAT_HTTP_TOKEN=$TOKEN numbat ship \
 
   /* ---------- field decoder ---------- */
   var fields = {
-    record_type: ["record_type", "One of event, finding, enforcement, indicator, or scan_summary. Route on this first — it tells you which schema the rest of the line follows."],
+    record_type: ["record_type", "One of event, finding, enforcement, indicator, scan_summary, or diagnostic. Route on this first — it tells you which schema the rest of the line follows. diagnostic is numbat talking about itself (info/warn/error), not about the agent."],
     schema_version: ["schema_version", "The record contract version, currently 0.2.0. It moves independently of the tool version, and only when the emitted shape actually changes. Pin your parsers to it."],
     rule_id: ["rule_id", "Which rule matched. Stable across versions, which makes it the right key for suppression lists and for counting noise during your baseline."],
     severity: ["severity", "The rule author's judgment of impact if the pattern is real. Set per rule in YAML, so your own rules control their own severity."],
@@ -732,7 +732,7 @@ env NUMBAT_HTTP_TOKEN=$TOKEN numbat ship \
     cited_event_ids: ["cited_event_ids", "The exact events that produced this finding. For a sequence rule you get every step. This is the join key back into the event stream — capture --emit all or these point at nothing."],
     observed_command: ["observed_command", "The command text as normalized, post-redaction. For pre-action hooks this is what was proposed, not what executed."],
     project_path_hash: ["project_path_hash", "A stable unsalted SHA-256 of the project path. It's a join key, not anonymization — treat it as pseudonymous metadata. Events keep a readable project_path instead."],
-    session_id: ["session_id", "Groups a conversation. It's also what sequence correlation windows on, so agents that don't emit one (Junie, for instance) can't produce chain findings."],
+    session_id: ["session_id", "Groups a conversation — but not one agent. numbat maps SubagentStart/SubagentStop onto session.start/session.end and copies session_id straight from the agent rather than minting one, so every parallel dispatch adds a lifecycle pair to its parent's id; only sub_agent tells them apart. It's also what sequence correlation windows on, so agents that don't emit one (Junie, for instance) can't produce chain findings."],
     source_agent: ["source_agent", "Which agent produced it — claude-code, codex, cursor, and so on. Useful for per-agent noise profiles when you run a mixed fleet."],
     source_type: ["source_type", "How it arrived: hook, otlp, or an at-rest artifact. This tells you whether the record could have blocked anything, and how fresh it is."],
     endpoint: ["endpoint", "hostname, os, arch, username, uid — on every single line. Add NUMBAT_DEVICE_ID to the environment for a stable opaque ID that survives hostname changes."],
