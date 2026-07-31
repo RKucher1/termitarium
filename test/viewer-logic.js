@@ -350,6 +350,21 @@ var RULE_IDS = Object.keys(RULECAT);
 ok("the catalog is not empty", RULE_IDS.length > 0, "got " + RULE_IDS.length);
 ok("the catalog records the numbat commit it was generated from",
    /^[0-9a-f]{40}$/.test(String(RULECAT_META.sha)), JSON.stringify(RULECAT_META.sha));
+
+// viewer.html ships publicly. Provenance must name the upstream source, never
+// the machine that generated it — an absolute path would leak the maintainer's
+// username and make two regenerations from identical input differ.
+(function(){
+  var meta = JSON.stringify(RULECAT_META);
+  ok("the catalog carries no absolute filesystem path",
+     !/"\/(Users|home|root|var|tmp)\//.test(meta) && meta.indexOf(":\\\\") === -1, meta);
+  ok("the catalog names its upstream source rather than a local directory",
+     /^https?:\/\//.test(String(RULECAT_META.source)) || RULECAT_META.source === "unknown",
+     JSON.stringify(RULECAT_META.source));
+  // the whole generated block, not just the metadata object
+  ok("the generated block contains no home-directory path",
+     !/\/Users\/[a-z]|\/home\/[a-z]/i.test(blockSrc("rulecat")));
+})();
 eq("the metadata rule count matches the catalog", RULECAT_META.rules, RULE_IDS.length);
 
 (function(){

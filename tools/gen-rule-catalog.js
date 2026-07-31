@@ -247,6 +247,19 @@ function gitSha(dir){
   } catch(e){ return null; }
 }
 
+// Provenance must identify the SOURCE, never this machine. An absolute local
+// path would leak the maintainer's username and directory layout into a file
+// that ships publicly, and would make the generated block differ between two
+// maintainers regenerating from identical input.
+function gitOrigin(dir){
+  try {
+    var cp = require("child_process");
+    var out = cp.execFileSync("git", ["-C", dir, "remote", "get-url", "origin"],
+                              { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return out.trim().replace(/^git@github\.com:/, "https://github.com/").replace(/\.git$/, "") || null;
+  } catch(e){ return null; }
+}
+
 function gitDescribe(dir){
   try {
     var cp = require("child_process");
@@ -370,7 +383,7 @@ function main(argv){
   if(!sha) die("could not determine the numbat commit SHA; pass --source-sha");
 
   var meta = {
-    source:  path.resolve(rulesDir),
+    source:  gitOrigin(rulesDir) || "unknown",
     sha:     sha,
     release: gitDescribe(rulesDir) || "unknown",
     rules:   built.count

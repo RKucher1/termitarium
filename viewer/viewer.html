@@ -577,11 +577,11 @@
      Rule titles and descriptions are © the numbat authors and are
      embedded here under the Apache License 2.0.
 
-     source:  /Users/ryankucher/code/numbat-src/rules
+     source:  https://github.com/perplexityai/numbat
      commit:  3d20d782d45001fd3bb200bc5690ce4b9ce0f12b
      release: v0.1.1
      rules:   51 */
-  var RULECAT_META = {"source":"/Users/ryankucher/code/numbat-src/rules","sha":"3d20d782d45001fd3bb200bc5690ce4b9ce0f12b","release":"v0.1.1","rules":51};
+  var RULECAT_META = {"source":"https://github.com/perplexityai/numbat","sha":"3d20d782d45001fd3bb200bc5690ce4b9ce0f12b","release":"v0.1.1","rules":51};
   var RULECAT = {
     "chain.guardrails_off_then_egress": {"v":"1.4","sev":"high","kind":"sequence","t":"Unattended approval mode followed by data-bearing egress","d":"The session entered a mode that does not require interactive human approval (Claude auto/bypassPermissions or Gemini/Qwen yolo) and later proposed a data-bearing outbound command or MCP call. The chain reports ordering, not confirmed transmission.","g":["attack.t1562.001","attack.t1048","attack.t1567"]},
     "chain.permission_denied_then_runtime_bypass": {"v":"1.3","sev":"high","kind":"sequence","t":"Permission denial followed by an agent runtime bypass request","d":"Within one session, a permission request was denied and the agent then requested a child coding-agent invocation in a runtime-specific unattended mode. This detects a concrete circumvention path without treating a generic tool error or one Codex policy flag as a bypass.","g":["permission_bypass","attack.t1562.001"]},
