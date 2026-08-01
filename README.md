@@ -220,6 +220,29 @@ pane of a type teach the eye to skip the section that has to stay worth reading.
 It denies the outcome as well as the content, because *returned* invites the
 reading that the call worked and nothing else on that pane refuses it.
 
+One consequence is visible in the layout. The detail pane repeats the row's
+sentence under the record-type heading, which is worth its place while it
+carries something the explanation does not — the command text on a
+`command.exec`, the path on a `file.read`. Where the explanation instead opens
+with that exact sentence and goes on, the longer one is **promoted** into the
+heading and the explanation drops its opening section: the pane carries each
+sentence once, and the header — which is sticky, and the only plain-English
+anchor while you scroll the JSON — carries the better one. That fires on
+`tool.result` and `message.assistant`, the two types whose panes otherwise said
+the same thing twice.
+
+It is not a general redundancy detector, and it would be wrong to describe it as
+one: `file.read` shows its path three times and this rule does not fire there.
+It fires where `describe()` and `explain()` happen to share an opening, which is
+a fact about how they were written. A test pins the two together so a reword
+cannot silently undo it.
+
+A `tool.result`'s elapsed time also shows in the row. It is derived from two
+records, so it cannot live in the row's own sentence — which means it is
+scannable but **not searchable**, because the free-text index is built before
+the pair index exists and a search matching a value no record contains would be
+worse than one that misses it.
+
 **Findings that cite it.** `cited_event_ids` only runs finding→event in the
 file. The viewer builds the reverse index, so an event can say *this action
 triggered a finding*, name the rule, and link to it — the mirror of the jump

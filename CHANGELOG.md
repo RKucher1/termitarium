@@ -4,6 +4,136 @@ Releases 0.2.0 through 0.5.0 were tagged retroactively, after the fact, at the
 commit where each version's notes below were completed. Only `v0.1.0` was
 tagged at the time.
 
+## 0.7.2
+
+Closing the other half of a claim, rather than leaving it stated.
+
+- **The pane's summary line still restated the row.** 0.7.1 fixed the
+  *explanation* headline — `explain().what` stopped duplicating `describe()` on
+  all 1,366 `tool.result` records. But `showDetail()` renders `describe()`'s
+  sentence again as `<p class="dsum">`, directly under the record-type heading
+  and directly above the explanation, so the pane's most prominent line was
+  still a verbatim copy of the row the operator had just clicked. The
+  requirement was *no headline that duplicates the row above it*, and by the
+  strictest reading that was still open. A cold reviewer put it exactly right
+  last round: the headline was not rewritten, the body was.
+
+  The line earns its place while it carries something the explanation does not
+  — the command text on a `command.exec`, the path on a `file.read`. So the
+  rule is not per type: the summary is omitted when the explanation *supersedes*
+  it, meaning it opens with that exact sentence and goes on to say more.
+  Measured over the corpus that is true of **1,366 of 1,366** `tool.result`
+  records and **0 of 6,455** other events — a general rule that happens to fire
+  on one type rather than a special case written for it.
+
+  `explain()` is now called once per render and its result reused for both the
+  decision and the pane, so the check costs nothing.
+
+Then four cold reviewers read it, and the honesty and coherence passes each
+found a live defect in the hardening from the round before.
+
+- **`interpret()` routed around its own bidi strip.** `ipTrunc` delegates to
+  `ipClean` only when the value has no newline; anything multi-line goes to
+  `ipLines`, which had neither the control-character strip nor the length
+  bound. That is the finding pane's *normal* path — 7 of the 9 findings carry a
+  multi-line `observed_command` — rendering into a `white-space:pre-wrap` block,
+  so a `U+202E` showed an operator a command that was not the command. The
+  comment above `ipClean` states that exact threat and asserts the bound; neither
+  held on the branch the pane actually takes.
+
+- **The pane's own no-payload line contradicted it on four real records.** The
+  four `tool.result` records tagged `tool_error` render "the agent marked this
+  one failed" and, a few pixels below, "not its content or its outcome". `tags`
+  is on the allowlist, so the withhold loop never fired. "a call **completed**"
+  also asserted completion on a call marked failed. The wording is per record now.
+
+- **The sticky header lost its only human-readable line.** Omitting the summary
+  left a `tool.result` header showing nothing but machine tokens while an
+  operator scrolled through the JSON — every other type keeps a sentence pinned.
+  So the superseding sentence is **promoted** into the header rather than the
+  weaker one dropped: the pane still never says the same thing twice, and the
+  sticky line is now the better sentence instead of no sentence. The rule fires
+  on `message.assistant` too once its two openings were aligned — that pane was
+  two sentences long and said the same one twice.
+
+- **The claim that this was "a general rule" was an overstatement**, and a
+  reviewer was right to say so: `file.read` puts its path on screen three times
+  and the rule does not fire there. It fires where `describe()` and `explain()`
+  were written with the same opening — an authorship fact, not a data property.
+  The comment says that now, and a test pins the two openings together so a
+  reword cannot silently un-promote.
+
+- **A record-derived decision was read off a plain object.** `DECISION[dn.name]`
+  in the rollup resolved `"constructor"` to `Object` and printed it into the
+  session summary — the invariant `CLAUDE.md` states, broken three functions
+  away from a comment explaining it.
+
+- **Elapsed time was invisible while scanning.** It is derived from two records,
+  so it lived only in the open pane: 1,366 rows all reading "The Read tool
+  returned", with the 27-minute call visually identical to a 115 ms file read
+  and no sort or filter to reach it. It renders in the row now. Deliberately
+  *not* folded into the search index — that string is built before the pair
+  index exists, and a search matching a value the record does not contain would
+  be worse than one that misses it. Scannable, not searchable, and named as such.
+
+- **The 92 pathless results now say the silence is numbat's.** They cluster at
+  the slow end — 14 of the 15 slowest calls carry no target — so the pane was
+  least informative on its most interesting records, and silence was
+  indistinguishable from an oversight.
+
+- The full target path is back in the pairing section: the headline elides the
+  middle and a `tool.result` carries no path of its own, so 1,124 of 1,366 real
+  targets appeared nowhere on the pane in full. Elided above, whole below.
+
+- Smaller: the payload label tracked *presence* rather than record type, so the
+  same slot read "message text" when empty and "observed" when filled; the
+  pairing sentence attached "where the call was requested" to *this file*
+  rather than to the record four words back; the observed cascade stringified
+  objects to `[object Object]`, which `describe()` has always refused; and
+  several comments cited counts a live corpus has grown past — they are anchored
+  to a named snapshot now rather than reading as current inventory.
+
+The security pass found no XSS across 114 hostile records × 7 polyglots in
+thirteen fields on both sides of every pair — 400 selections in real Chrome,
+zero injected nodes, zero handlers, zero page errors — and confirmed the network
+surface, the caps, and the prototype guards. It found five things that were real:
+
+- **U+061C defeated the bidi strip.** The class covered `U+202A–202E` and the
+  zero-width block but not ARABIC LETTER MARK, which is also a bidi control:
+  `/vault/keys-<U+061C>2-99.pem` renders as `keys-99-2.pem`. Strictly worse than
+  the `U+202E` case the comment cites, because the promoted headline borrows its
+  path from *another* record, so an operator cannot cross-check it against the
+  row they clicked. Soft hyphen, word joiner, the invisible-operator block and
+  the plane-14 TAG characters went with it — `/etc/pas<U+00AD>swd` rendered
+  identically to `/etc/passwd` while defeating the viewer's own search.
+
+- **The session gate normalised instead of comparing.** It used `exClean`, so
+  `"S"` and `"S<U+200B>"` — and `"SEC  RET"` and `"SEC RET"` — were the same
+  session and one record's path crossed into the other's headline. `exKey`
+  *refuses* a whitespace-bearing `tool_call_id` for exactly this reason;
+  `session_id` had the opposite policy. Compared raw now.
+
+- **The tags loop was uncapped**, the same defect already fixed for
+  `cited_event_ids` twenty lines above it: 300k tags built 300k DOM nodes on
+  every selection, and re-ran on every arrow-key press. Capped, and the cap is
+  stated. So are the header's stat tiles, which built one per distinct
+  `record_type` with an unbounded label.
+
+- **`record_type` was raw in `mkRec` and cleaned in `explain()`.** A record typed
+  `"finding "` rendered neither an interpretation nor an explanation — a finding
+  losing its entire analysis silently. Normalised once, so every consumer agrees.
+
+- The reviewer noted the file moved four times underneath it and re-ran
+  everything against a final pin. Its earlier findings about the omitted summary
+  line were about a build that no longer existed by the time it reported.
+
+- `META_FIELDS` is declared null-prototype like every other record-keyed map.
+  It was already safe — the keys are a hardcoded list and the read goes through
+  `hasOwnProperty`, so an inherited name returns false and *withholds* the
+  no-payload claim, which is the direction that cannot lie — but `CLAUDE.md`
+  states the invariant without an exception, and a reader should not have to
+  re-derive why this one was fine.
+
 ## 0.7.1
 
 One defect, named in 0.7.0's summary and left unresolved because the obvious fix

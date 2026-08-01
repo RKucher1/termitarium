@@ -157,6 +157,7 @@
   .note{border-left:2px solid var(--amber);background:rgba(216,162,74,.07);padding:10px 13px;font-size:12px;line-height:1.6;color:var(--dim);border-radius:0 2px 2px 0}
   .note b{color:var(--band);font-weight:600}
   .note .warn{color:var(--amber)}
+  .row .ela{font-style:normal;font-family:var(--mono);font-size:9.5px;color:var(--dust);margin-left:6px}
   .row .terr{font-style:normal;font-family:var(--mono);font-size:9.5px;color:var(--amber);
              border:1px solid rgba(216,162,74,.45);border-radius:2px;padding:0 3px;margin-left:6px;
              vertical-align:1px}
@@ -313,6 +314,17 @@
 (function(){
   "use strict";
 
+  /* ═════ a note on the numbers in these comments ═════
+     Several comments below cite measured counts — "1,274 of 1,366", "all 3,228
+     pairs", "106 indicator records". They all refer to one fixed snapshot: the
+     ~6,800-record reference corpus these behaviours were designed against.
+     numbat's output file is live and grows continuously, so those totals will
+     not match a corpus read today; the corpus this file was last measured
+     against held 8,029 records. The counts are recorded because the RATIOS and
+     the structural facts they establish are what the code depends on — that a
+     tool.result never carries a payload, that a pair never runs backwards —
+     not because they are current inventory. Re-measure before relying on a
+     figure; do not assume one is stale merely because it is small. */
   var ROW = 29, OVER = 12;
   var POLL_MS = 4000;
 
@@ -669,7 +681,9 @@
     if(t){ var p = Date.parse(t); if(!isNaN(p)) ms = p; }
     var desc = describe(o);
     return {
-      rt: s(o.record_type) || "unknown", ts:t, tms:ms,
+      // Normalised once here so every consumer agrees: explain() and interpret()
+      // clean it, mkRec did not, so "finding " rendered no analysis at all.
+      rt: s(o.record_type).replace(/\s+/g, " ").trim() || "unknown", ts:t, tms:ms,
       sev: s(o.severity), rule: s(o.rule_id) || s(o.deny_rule_id),
       agent: s(o.source_agent), etype: s(o.event_type),
       sid: s(o.session_id), eid: s(o.event_id),
@@ -777,7 +791,7 @@
     // 58-character string. Mirrors exClean(); a test asserts they agree.
     var raw = dsStr(v);
     if(raw.length > 4096) raw = raw.slice(0, 4096);
-    var t = raw.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim();
+    var t = raw.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069]/g, "").replace(/\uDB40[\uDC00-\uDC7F]/g, "").replace(/\s+/g, " ").trim();
     if(t.length <= n) return t;
     // Slicing between a surrogate pair leaves a lone half, which renders as
     // U+FFFD — and this runs on every row in the list.
@@ -881,8 +895,10 @@
     if(et === "message.assistant"){
       // "replied" asserts a reply relationship no field on the record carries,
       // and the pane one line below says "sent a message".
+      // Opens with explain()'s sentence so the promotion rule can fire here too
+      // — without it this pane said the same thing twice, one line apart.
       var mv = dsTrunc(o.content_preview, 110);
-      return mv ? "Agent sent a message: " + mv : "Agent sent a message";
+      return mv ? "The agent sent a message: " + mv : "The agent sent a message";
     }
     if(et === "tool.call")   return tool ? "Called the " + tool + " tool" : "Called a tool";
     if(et === "tool.result") return tool ? "The " + tool + " tool returned" : "A tool returned";
@@ -985,14 +1001,25 @@
     // 58-character string. Mirrors exClean(); a test asserts they agree.
     var raw = ipStr(v);
     if(raw.length > 4096) raw = raw.slice(0, 4096);
-    return raw.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim();
+    return raw.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069]/g, "").replace(/\uDB40[\uDC00-\uDC7F]/g, "").replace(/\s+/g, " ").trim();
   }
   // Collapse runs of spaces and tabs but keep line structure: a shell script
   // folded onto one line runs its arguments into its heredoc body and becomes
   // markedly harder to read than the raw record it is summarising.
   function ipLines(v){
-    return ipStr(v).replace(/\r/g, "").replace(/[ \t]+/g, " ")
-                   .replace(/\n{3,}/g, "\n\n").replace(/[ \t]*\n[ \t]*/g, "\n").trim();
+    /* Keeps line structure, so it cannot delegate to ipClean — but it must
+       still strip what ipClean strips and bound what ipClean bounds. It did
+       neither, and ipTrunc routes every multi-line value here, which is the
+       normal path for a finding: 7 of the 9 in the reference snapshot carry a
+       multi-line observed_command. A U+202E in one rendered the command
+       reversed inside .seen (white-space:pre-wrap), which is a forensic tool
+       showing an operator a command that is not the command.
+       \n and \t are preserved here deliberately; the rest go. */
+    var t = ipStr(v);
+    if(t.length > 4096) t = t.slice(0, 4096);
+    return t.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069]/g, "").replace(/\uDB40[\uDC00-\uDC7F]/g, "")
+            .replace(/\r/g, "").replace(/[ \t]+/g, " ")
+            .replace(/\n{3,}/g, "\n\n").replace(/[ \t]*\n[ \t]*/g, "\n").trim();
   }
   function ipTrunc(v, n){
     var s = ipStr(v).indexOf("\n") === -1 ? ipClean(v) : ipLines(v);
@@ -1164,7 +1191,7 @@
   function exClean(v){
     var t = exStr(v);
     if(t.length > 4096) t = t.slice(0, 4096);
-    return t.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, "")
+    return t.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069]/g, "").replace(/\uDB40[\uDC00-\uDC7F]/g, "")
             .replace(/\s+/g, " ").trim();
   }
   function exTrunc(v, n){
@@ -1189,6 +1216,12 @@
       if(tail.length < p.length) return exTrunc(tail, 58);
     }
     return exTrunc(p, 58);
+  }
+  // Two timestamps may only be subtracted when one clock produced both.
+  function exSameHost(a, b){
+    var ea = (a && a.endpoint && typeof a.endpoint === "object") ? exClean(a.endpoint.hostname) : "";
+    var eb = (b && b.endpoint && typeof b.endpoint === "object") ? exClean(b.endpoint.hostname) : "";
+    return ea === eb;
   }
   function exMs(v){
     var t = exClean(v);
@@ -1348,7 +1381,7 @@
      Returns whether the counterpart sits earlier in the file as well as what it
      is. buildIndex() pushes in file order, so position in this list *is* file
      order — which means the ordering can be checked rather than assumed. It
-     holds for all 3,228 pairs in the reference corpus, but a claim that is true
+     holds for all 3,228 pairs in the reference snapshot this was measured against, but a claim that is true
      of every file seen so far is still a claim, and this one is cheap to
      verify. Where it cannot be established, `before` is null and the caller
      makes no ordering claim at all. */
@@ -1359,7 +1392,7 @@
      member of the group when several share a key and then name it with full
      confidence; or assert file ordering it never checked. buildIndex() pushes
      in file order, so position in this list IS file order and the ordering can
-     be verified — it holds for all 3,228 pairs in the reference corpus, but a
+     be verified — it holds for all 3,228 pairs in the reference snapshot this was measured against, but a
      claim true of every file seen so far is still a claim.
 
      `want` is the type the caller expects on the other side, so the right mate
@@ -1376,12 +1409,19 @@
     if(!Array.isArray(list)) return null;
 
     var self = -1, others = [], i;
-    var mySid = exClean(o.session_id);
+    // Both sides must name a session before they can be said to share one; a
+    // counterpart carrying none used to pass into any session's records.
+    // Compared raw, not normalised. exClean strips zero-width characters and
+    // collapses runs of spaces, so "S" and "S\u200B" — and "SEC  RET" and
+    // "SEC RET" — became the same session and a record from one borrowed the
+    // other's path. exKey refuses such a tool_call_id outright for the same
+    // reason; session_id gets the same discipline.
+    var mySid = (typeof o.session_id === "string") ? o.session_id : "";
     for(i = 0; i < list.length; i++){
       if(list[i] === o && self === -1){ self = i; continue; }
       // A counterpart in another session is not this record's counterpart.
-      var theirSid = exClean(list[i].session_id);
-      if(mySid && theirSid && mySid !== theirSid) continue;
+      var theirSid = (typeof list[i].session_id === "string") ? list[i].session_id : "";
+      if(mySid !== theirSid) continue;
       others.push(i);
     }
     if(!others.length) return null;
@@ -1488,8 +1528,11 @@
     if(ty === "sha1")
       limits.push("A 40-character hex string is classified as sha1 by shape alone — a git commit hash has the same shape.");
     else if(ty === "email")
-      // Naming git@github.com as the counter-example ON git@github.com reads as
-      // a copy-paste rather than a point.
+      /* Naming git@github.com as the counter-example ON git@github.com reads as
+         a copy-paste rather than a point. The general claim is that the type is
+         a shape guess; the specific examples in the snapshot measured were an
+         SSH remote and a commit trailer, and the set has grown since — do not
+         read the example as an inventory. */
       limits.push(val === "git@github.com"
         ? "An address-shaped string is classified as email by shape alone — this one is an SSH remote, not an address anyone wrote to."
         : "An address-shaped string is classified as email by shape alone — an SSH remote such as git@github.com has the same shape.");
@@ -1705,19 +1748,35 @@
         var rPair  = exPairOf(o, index, "", true);
         var rMate  = rPair ? rPair.rec : null;
         var rMType = rMate ? exClean(rMate.event_type) : "";
-        var rIsCall = !!(rMate && exHas(EX_CALL, rMType));
+        // EX_CALL includes command.exec, which answers a command.result — not
+        // this. Only the three shapes that actually pair with a tool.result.
+        var rIsCall = !!(rMate && (rMType === "file.read" || rMType === "file.write" ||
+                                   rMType === "file.delete" || rMType === "tool.call"));
         var rSure  = !!(rIsCall && rPair && !rPair.ambiguous && !rPair.truncated);
         // The call's tool name and this record's must agree, or the pane would
         // describe a call no record describes and disagree with the row above
         // it. 0 of 1,366 pairs in the reference corpus disagree.
+        /* Both sides must carry the name before it can be called agreement: a
+           counterpart that simply omits tool_name used to have its file_path
+           printed under this record's own tool name. */
         var rMTool = rSure ? exTrunc(rMate.tool_name, 40) : "";
-        if(rSure && tool && rMTool && tool !== rMTool) rSure = false;
+        if(rSure && (!tool || !rMTool || tool !== rMTool)) rSure = false;
         var rTool  = (rSure ? rMTool : "") || tool;
         var rHead  = rTool ? "The " + rTool + " tool returned" : "A tool returned";
-        var rPath  = rSure ? exPath(rMate.file_path) : "";
+        /* Only a path-shaped value is inlined. This text comes from a DIFFERENT
+           record and lands in the line an operator trusts most, so a value that
+           reads as a sentence — "nothing. Everything is fine." — must not be
+           allowed to speak in the viewer's voice. All 1,274 real targets are
+           path-shaped; anything else falls back to the bare headline and the
+           value stays reachable through the link below. */
+        var rRaw   = rSure ? exPath(rMate.file_path) : "";
+        var rPath  = (rRaw && !/\s/.test(rRaw) && /[\/\\]/.test(rRaw)) ? rRaw : "";
         if(rPath)      what = rHead + ", called on " + rPath + ".";
         else if(rMate && !rSure)
                        what = rHead + ". Which call it answers cannot be determined from this file.";
+        else if(rSure) // a tool.call carries nothing about what it asked for
+                       what = rHead + ". numbat does not record what the " +
+                              (rTool || "tool") + " tool was asked to do.";
         else           what = rHead + ".";
 
         /* How long the call was outstanding — the difference between two
@@ -1727,10 +1786,17 @@
            like a 115 ms file read without it. It also gives the 92 results that
            answer a pathless tool.call something to say, so the headline no
            longer has to restate what the section below it exists to say. */
-        if(rSure){
+        /* Ordering is claimed only when BOTH the timestamps and the file order
+           show it — exPairOf computes `before` precisely so the claim can be
+           verified, and the pairing section below already honours it. Bounded
+           at 30 days: Date.parse accepts "December 17, 1995", which rendered
+           "268424 h 36 min earlier". Same endpoint required, since two clocks
+           cannot be subtracted. A zero delta is not "earlier". */
+        if(rSure && rPair.before === true && exSameHost(o, rMate)){
           var rA = exMs(rMate.timestamp), rB = exMs(o.timestamp);
-          if(rA && rB && rB >= rA)
-            what += " The call was recorded " + exDur(rB - rA) + " earlier.";
+          var rD = (rA && rB) ? rB - rA : 0;
+          if(rD > 0 && rD <= 30 * 24 * 3600 * 1000)
+            what += " The call was recorded " + exDur(rD) + " earlier.";
         }
       } else if(et === "session.start" || et === "session.end"){
         var edge = (et === "session.start") ? "start" : "end";
@@ -1809,12 +1875,16 @@
               // command.result as the record "where the command was proposed"
               // asserts a proposal that record never made.
               noun2 = (exClean(mate.event_type) === "command.exec") ? "command" : "call";
-              txt = "This is the result of a matching " + mateType + where +
-                    ", where the " + noun2 + " was " +
-                    (noun2 === "command" ? "proposed" : "requested") + ".";
-              // The target is named in the headline for tool.result; repeating
-              // it here would put the same path on screen twice.
-              var mp2 = (et === "tool.result") ? "" : exTrunc(mate.file_path, 200);
+              // "…in this file, where the call was requested" attaches the
+              // clause to the file rather than to the record four words back.
+              txt = "This is the result of a matching " + mateType + " — the record that " +
+                    (noun2 === "command" ? "proposed" : "requested") + " it —" +
+                    (where || "") + ".";
+              /* The headline elides the middle of the path, and a tool.result
+                 carries none of its own, so without this the full target was
+                 nowhere on the pane — 1,124 of 1,366 real paths exceed the
+                 headline's 58-character budget. Elided above, whole here. */
+              var mp2 = exTrunc(mate.file_path, 200);
               if(mp2) txt += " It targeted " + mp2 + ".";
               if(pair.ambiguous)
                 txt += " Several records share this tool_call_id, so which one this answers cannot be determined from this file.";
@@ -1938,7 +2008,7 @@
       /* confidence deliberately gets no line here. It is a definition of a
          field, not a property of this record, and this section is for what the
          record does and does not establish. It also does not vary: every one of
-         the 6,715 events in the reference corpus is "medium", so a bullet
+         the events in the snapshot measured is "medium", so a bullet
          explaining it appeared on 100% of panes, always last, and was a quarter
          of all the text this function produced. A constant in the position
          where the rare real caveat lives teaches the eye to skip the section.
@@ -1998,7 +2068,7 @@
     // 58-character string. Mirrors exClean(); a test asserts they agree.
     var raw = ruStr(v);
     if(raw.length > 4096) raw = raw.slice(0, 4096);
-    return raw.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim();
+    return raw.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069]/g, "").replace(/\uDB40[\uDC00-\uDC7F]/g, "").replace(/\s+/g, " ").trim();
   }
   function ruTrunc(v, n){
     var t = ruClean(v);
@@ -2369,7 +2439,13 @@
     order.forEach(function(t){ seen[t]=1;
       if(k[t]) h+=st(t,k[t],label(t,k[t]),t==="finding"?"s-hi":t==="enforcement"?"s-wa":t==="indicator"?"s-ok":t==="scan_summary"?"s-vi":"");
     });
-    Object.keys(k).forEach(function(t){ if(!seen[t]) h+=st(t,k[t],label(t,k[t]),""); });
+    // record_type is record-derived: a file with 50,000 distinct values built
+    // 50,000 tiles and as many listeners.
+    var extra=Object.keys(k).filter(function(t){ return !seen[t]; }), TILECAP=12;
+    extra.slice(0,TILECAP).forEach(function(t){ h+=st(trunc(t,40),k[t],label(t,k[t]),""); });
+    if(extra.length>TILECAP)
+      h+=st("+"+(extra.length-TILECAP)+" more types",
+            extra.slice(TILECAP).reduce(function(a,t){ return a+k[t]; },0),"other record types","");
     var hi=(sv.high||0)+(sv.critical||0);
     h+=st("__hi",hi,"high sev",hi?"s-hi":"s-ok");
     h+=st("",nSess,"sessions","s-vi static");
@@ -2529,6 +2605,26 @@
     rz=setTimeout(function(){ rz=null; paint(); drawTL(); },80);
   });
 
+  /* A tool.result's elapsed time exists only in the pane, because it is derived
+     from two records and describe() is pure over one. That made the slow tail
+     unfindable: 1,268 of 1,366 are under a second, 5 exceed five minutes, and
+     the 27-minute one is visually identical to a 115 ms file read in a list of
+     1,366 rows reading "The Read tool returned". Its sibling command.result
+     carries duration_ms and shows it in the row; this one could not.
+
+     Surfaced at paint time, so it costs one map lookup per visible row and
+     nothing at parse time. It is deliberately NOT folded into r.desc: that
+     string feeds the free-text index built before the pair index exists, and a
+     search that matched a value the record does not contain would be worse
+     than one that misses it. So this is scannable but not searchable — named
+     rather than quietly half-done. */
+  function rowElapsed(r){
+    if(r.etype !== "tool.result" || !r.o) return "";
+    var e = explain(r.o, eventIndex());
+    if(!e) return "";
+    var m = /The call was recorded ([^.]+) earlier\./.exec(e.what);
+    return m ? m[1] : "";
+  }
   function rowHTML(r,hl){
     var body=esc(trunc(r.desc,200));
     if(hl) body=mark(body,hl);
@@ -2540,6 +2636,7 @@
       '<span class="kd k-'+cls(r.rt)+'">'+esc(r.rt)+'</span>'+
       '<span class="ag">'+esc(r.agent||"—")+'</span>'+
       '<span class="bd"><strong>'+body+'</strong>'+ev+
+      (function(){ var el=rowElapsed(r); return el?'<i class="ela" title="time between the call and this result">'+esc(el)+'</i>':''; })()+
       (r.terr?'<i class="terr" title="tagged tool_error — the agent marked this one failed">tool_error</i>':'')+
       '</span></div>';
   }
@@ -2618,10 +2715,12 @@
      block and a full JSON dump, and a command.result carries one useful fact —
      so a section is omitted when the record has nothing to put in it rather
      than padded to a uniform shape. */
-  function exRender(ex){
+  function exRender(ex, promoted){
     if(!ex) return "";
     var h = '<span class="lbl">explanation</span><div class="note">';
-    h += '<div class="ipsec"><b>What this is</b><br>'+esc(ex.what)+'</div>';
+    // When the header already carries this sentence, repeating it here would
+    // reinstate the duplication promoting it was meant to remove.
+    if(!promoted) h += '<div class="ipsec"><b>What this is</b><br>'+esc(ex.what)+'</div>';
 
     if(ex.seen){
       h += '<div class="ipsec"><b>What it matched in</b>'+
@@ -2778,7 +2877,7 @@
      set, because this viewer cannot know that an unrecognised field is empty
      of meaning. Kept deliberately generous: a false silence costs nothing, a
      false denial is a fabricated absence. */
-  var META_FIELDS = {};
+  var META_FIELDS = Object.create(null);
   ("record_type event_type event_id run_id schema_version session_id source_agent source_type " +
    "project_path project_path_hash timestamp detected_at first_seen last_seen endpoint evidence " +
    "actor confidence tool_name tool_call_id sub_agent tags model redacted duration_ms exit_code " +
@@ -2786,11 +2885,25 @@
    "value file_path observed_file_path message").split(" ").forEach(function(k){ META_FIELDS[k] = 1; });
 
   var NOPAYLOAD = {
-    "tool.result":       { lbl:"output",
-      txt:"not captured — numbat records that a call completed, not its content or its outcome." },
-    "message.assistant": { lbl:"message text",
-      txt:"not captured — numbat records that the agent sent a message, not what it said." }
+    "tool.result":       { lbl:"output", txt:function(o){
+      /* "not its outcome" is false on a record the agent tagged tool_error:
+         the explanation says so and the badge shows it, a few pixels above.
+         "a call completed" also asserts completion on a call marked failed. */
+      return hasTag(o, "tool_error")
+        ? "not captured — this record marks the call's return, not what it returned. " +
+          "The tool_error tag is all it says about the outcome."
+        : "not captured — this record marks the call's return, not what it returned " +
+          "or whether it succeeded.";
+    } },
+    "message.assistant": { lbl:"message text", txt:function(){
+      return "not captured — numbat records that the agent sent a message, not what it said.";
+    } }
   };
+  function hasTag(o, t){
+    if(!o || !Array.isArray(o.tags)) return false;
+    for(var i = 0; i < o.tags.length; i++) if(String(o.tags[i]).trim() === t) return true;
+    return false;
+  }
 
   var DECISION = {
     no_override: "did not intervene", monitor: "did not intervene", observe: "did not intervene",
@@ -2946,7 +3059,10 @@
       var decs = [];
       for(var dq = 0; dq < r.enforcement.decisions.length && dq < 4; dq++){
         var dn = r.enforcement.decisions[dq];
-        decs.push(DECISION[dn.name] || dn.name.replace(/_/g, " "));
+        // dn.name is a decision straight off a record; a bare read resolved
+        // "constructor" to Object and printed it into the summary.
+        decs.push((Object.prototype.hasOwnProperty.call(DECISION, dn.name)
+                     ? DECISION[dn.name] : "") || dn.name.replace(/_/g, " "));
         if(dn.count > 1) decs[decs.length-1] += " ×" + dn.count;
       }
       if(r.enforcement.decisions.length > 4) decs.push("+" + (r.enforcement.decisions.length - 4) + " more");
@@ -3098,6 +3214,36 @@
     if(sid) showRollup(sid); else showPlaceholder();
   }
 
+  /* Does the explanation's opening sentence already contain the pane's summary
+     line, and go on to say more? Where it does, the longer one is promoted into
+     the sticky header and the explanation drops its opening section — the pane
+     carries each sentence once, and the header carries the better one.
+
+     This is not a general redundancy detector, and the earlier comment claiming
+     it was overstated it: a cold reviewer pointed out that file.read puts its
+     path on screen three times and this rule does not fire there. It fires
+     where describe() and explain() were written with the same opening — an
+     authorship fact, not a data property. In the snapshot measured that is
+     1,366 of 1,366 tool.result records and 0 of 6,455 other events. A test pins
+     the two openings together so a reword to either cannot silently un-promote. */
+  function dsumSuperseded(sum, what){
+    var a = String(sum == null ? "" : sum).replace(/[.\s]+$/, "").trim();
+    var b = String(what == null ? "" : what).replace(/[.\s]+$/, "").trim();
+    // b.indexOf(a) === 0 already implies b is at least as long as a, so no
+    // separate length check is needed. The empty-summary guard is not
+    // redundant: "".indexOf is 0 against anything.
+    if(!a || !b) return false;
+    if(b.indexOf(a) !== 0) return false;
+    /* The continuation must start at a word boundary, so "The Read" cannot be
+       swallowed by "The Reader tool returned". This does NOT protect against a
+       continuation that negates its own prefix — "…replied to nothing of the
+       sort" would still suppress — and it is not trying to: both strings come
+       from functions in this file, and the real guarantee is the test that
+       pins describe() and explain() to the same opening sentence. */
+    var rest = b.charAt(a.length);
+    return rest === "" || rest === "," || rest === "." || rest === ";" || rest === " ";
+  }
+
   function showDetail(r){
     if(!r) return;
     var o=r.o,h="";
@@ -3123,7 +3269,17 @@
     // indicator and enforcement carry neither rule_id nor event_type, so this
     // fell through to the record type — printed again as a chip one line below.
     h+='<h2>'+esc(r.rule||r.etype||s(o.type)||s(o.decision)||r.rt)+'</h2>';
-    h+='<p class="dsum">'+esc(r.desc)+'</p><div class="dmeta">';
+    /* .dhead is sticky, so its summary line is the plain-English anchor an
+       operator keeps while scrolled into the JSON. Omitting it left a
+       tool.result header showing nothing but machine tokens. So the superseding
+       sentence is PROMOTED into the header rather than the weaker one dropped:
+       the pane never says the same thing twice, and the sticky line is the
+       better sentence instead of no sentence. exRender then skips its opening
+       section, which is now the header. */
+    var ex = (r.rt==="finding") ? null : explain(o, eventIndex());
+    var promoted = !!(ex && dsumSuperseded(r.desc, ex.what));
+    h+='<p class="dsum">'+esc(promoted ? ex.what : r.desc)+'</p>';
+    h+='<div class="dmeta">';
     h+=tag(r.rt,r.rt==="finding"?"hi":"");
     if(r.sev) h+=tag(r.sev,(r.sev==="high"||r.sev==="critical")?"hi":r.sev==="medium"?"wa":"");
     if(o.confidence) h+=tag("conf "+s(o.confidence),"");
@@ -3139,8 +3295,13 @@
     if(o.title) h+='<span class="lbl">title</span><div style="font-size:13.5px;line-height:1.55">'+esc(s(o.title))+'</div>';
     if(o.description) h+='<span class="lbl">description</span><div style="font-size:12.5px;line-height:1.6;color:var(--dim)">'+esc(s(o.description))+'</div>';
     if(r.rt==="finding") h+=ipRender(interpret(o,RULECAT));
-    else h+=exRender(explain(o,eventIndex()));   // event, indicator, enforcement
-    var cmd=s(o.command)||s(o.observed_command)||s(o.content_preview)||s(o.url)||s(o.value)||s(o.file_path)||s(o.observed_file_path)||s(o.message);
+    else h+=exRender(ex, promoted);   // event, indicator, enforcement
+    // Primitives only. s() is String(), so an object field rendered
+    // "[object Object]" and an array rendered "a,b" — values no record
+    // contains — in the box reserved for text that came out of the file.
+    // describe() has refused this since it was written; the render layer had not.
+    var sp=function(v){ return (v===null||v===undefined||typeof v==="object")?"":s(v); };
+    var cmd=sp(o.command)||sp(o.observed_command)||sp(o.content_preview)||sp(o.url)||sp(o.value)||sp(o.file_path)||sp(o.observed_file_path)||sp(o.message);
     /* Event types that produce something the record then does not carry. The
        absence belongs in the slot the content would have filled — not as a
        sentence in the closed condition set, where the same words on every
@@ -3173,14 +3334,20 @@
            (typeof pv !== "object" || (Array.isArray(pv) ? pv.length : true))){ np = null; break; }
       }
     }
-    if(np) h+='<span class="lbl">'+esc(np.lbl)+'</span><div class="ruline">'+esc(np.txt)+'</div>';
+    if(np) h+='<span class="lbl">'+esc(np.lbl)+'</span><div class="ruline">'+esc(np.txt(o))+'</div>';
     if(cmd){
       // Bounded like every other record-derived render path: this is fed
       // straight from record content and had no cap at all.
       var OBSCAP=40000, cut=cmd.length>OBSCAP;
       // "observed" is the wrong word for an indicator, whose pane exists to say
       // numbat observed nothing — it matched a string in someone else's text.
-      h+='<span class="lbl">'+(r.rt==="indicator"?"extracted value":"observed")+'</span>'+
+      // Labelled by what the record IS, not by whether this field happened to be
+      // filled — otherwise a message.assistant carrying content_preview files
+      // its text under "observed" while an empty one calls the slot "message text".
+      var lbl = (r.rt==="indicator") ? "extracted value"
+              : (Object.prototype.hasOwnProperty.call(NOPAYLOAD, r.etype) ? NOPAYLOAD[r.etype].lbl
+                                                                          : "observed");
+      h+='<span class="lbl">'+esc(lbl)+'</span>'+
          '<div class="cmd">'+esc(cut?cmd.slice(0,OBSCAP):cmd)+
          (cut?'\n\n… '+esc((cmd.length-OBSCAP).toLocaleString())+' more characters, in the full record below':'')+
          '</div>';
@@ -3206,7 +3373,9 @@
     }
     if(Array.isArray(o.tags)&&o.tags.length){
       h+='<span class="lbl">tags</span><div class="dmeta">';
-      for(var g=0;g<o.tags.length;g++) h+=tag(s(o.tags[g]),"");
+      var nTag=o.tags.length, TAGCAP=200;
+      for(var g=0;g<nTag&&g<TAGCAP;g++) h+=tag(trunc(s(o.tags[g]),120),"");
+      if(nTag>TAGCAP) h+='<span class="tag">+'+esc(nTag-TAGCAP)+' more</span>';
       h+='</div>';
     }
     if(r.sid) h+='<span class="lbl">session</span><button type="button" class="btn jump" id="sessBtn" title="Filter to this session and summarize it">⧉ isolate &amp; summarize '+esc(r.sid)+'</button>';

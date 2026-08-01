@@ -53,6 +53,13 @@ function loadBlock(name, wants){
   }
 }
 
+// The suppression predicate, lifted on demand so blocks need no ordering.
+function liftSuperseded(){
+  var m = HTML.match(/function dsumSuperseded\(sum, what\)\{[\s\S]*?\n  \}/);
+  if(!m) bail("could not lift dsumSuperseded()");
+  return new Function("return " + m[0] + "; dsumSuperseded;")();
+}
+
 function bail(msg){
   process.stderr.write("FATAL: " + msg + "\n");
   process.exit(2);
@@ -2280,8 +2287,12 @@ var NOIDX = buildIndex([]);
   var all = [e.what].concat(e.next?[e.next.text]:[]).concat(e.limits).join(" ");
   ok("no sentence claims what the record does not carry",
      !/does not carry what was returned/.test(all), all);
-  ok("the pairing section no longer repeats the target",
-     !/It targeted/.test(e.next.text), e.next.text);
+  /* The headline elides the middle of the path and a tool.result carries none
+     of its own, so the pairing section carries the whole one — 1,124 of 1,366
+     real paths exceed the headline's budget, and without this the full target
+     appeared nowhere on the pane. Elided above, whole here. */
+  ok("the pairing section carries the unelided target",
+     /It targeted \/a\/b\.js/.test(e.next.text), e.next.text);
 
   /* Long paths elide the MIDDLE, keeping the filename. Tail truncation kept
      120 characters of worktree prefix and destroyed the identifying segment —
@@ -2306,8 +2317,16 @@ var NOIDX = buildIndex([]);
   // to say instead of restating the section directly below them.
   var Q = pairFor("tool.call", "Agent", null, T0, "2026-07-31T18:17:14.000Z");
   var qe = explain(Q.res, Q.idx);
-  eq("a targetless result reports how long its call was outstanding",
-     qe.what, "The Agent tool returned. The call was recorded 17 min 14 s earlier.");
+  /* The 92 pathless results cluster hard at the slow end — 14 of the 15 slowest
+     calls in the corpus carry no target — so this is the pane at its least
+     informative on its most interesting records. It now says the silence is
+     numbat's rather than leaving it indistinguishable from an oversight. */
+  eq("a targetless result reports the silence and the delay",
+     qe.what,
+     "The Agent tool returned. numbat does not record what the Agent tool was asked to do. " +
+     "The call was recorded 17 min 14 s earlier.");
+  ok("a targeted result does not carry the silence sentence",
+     !/does not record what the/.test(e.what), e.what);
   ok("a targetless result does not restate the section below it",
      !/answering a tool\.call/.test(qe.what), qe.what);
   ok("a targetless result is still not the row summary reworded",
@@ -2444,8 +2463,12 @@ var NOIDX = buildIndex([]);
     /* The timing above is a smoke test and passes even uncapped on a fast
        machine, so the invariant is asserted structurally too: every one of the
        four blocks bounds the input before it scans it. */
-    eq("all four render blocks bound the input before scanning",
-       (HTML.match(/length > 4096/g) || []).length, 4);
+    /* Five, not four: ipTrunc routes any multi-line value to ipLines, which
+       keeps line structure and so cannot delegate to ipClean — it needed the
+       bound and the strip of its own. That is the finding pane's normal path,
+       since most observed_command values span lines. */
+    eq("every render path bounds the input before scanning",
+       (HTML.match(/length > 4096/g) || []).length, 5);
   })();
 
   /* subagent attribution was suppressed by a bare substring test against the
@@ -2542,9 +2565,26 @@ var NOIDX = buildIndex([]);
     ok("the absence claim is withheld when the record carries an unknown field",
        /hasOwnProperty\.call\(META_FIELDS, pk\)/.test(HTML) && /np = null; break;/.test(HTML),
        "unrecognised fields must suppress the no-payload claim");
-    ok("the metadata allowlist is declared", /var META_FIELDS = \{\};/.test(HTML));
+    /* Null-prototype, like every other map the viewer keys on record-derived
+       strings. Not strictly required here — the keys are a hardcoded list and
+       the read goes through hasOwnProperty, so an inherited name already
+       returns false and WITHHOLDS the claim, which is the safe direction — but
+       CLAUDE.md states the invariant without an exception and a reader should
+       not have to re-derive why this one is fine. */
+    ok("the metadata allowlist is declared null-prototype",
+       /var META_FIELDS = Object\.create\(null\);/.test(HTML));
+    ok("the allowlist is read through hasOwnProperty, not a bare lookup",
+       /hasOwnProperty\.call\(META_FIELDS, pk\)/.test(HTML) && !/META_FIELDS\[pk\]/.test(HTML));
     ok("an array event_type cannot reach the gate by String() coercion",
        /typeof o\.event_type === "string"/.test(HTML));
+    /* JSON.parse makes "__proto__" an OWN property rather than invoking the
+       setter, so it is enumerated by the for..in over record keys — and
+       hasOwnProperty returns false for it against the allowlist, so it counts
+       as an unrecognised field and withholds the claim. That is the direction
+       that cannot lie; assert it rather than assuming it. */
+    ok("a record field named __proto__ counts as unrecognised, not as metadata",
+       Object.prototype.hasOwnProperty.call(
+         JSON.parse('{"a":1,"__proto__":{"x":1}}'), "__proto__") === true);
     var m = HTML.match(/var NOPAYLOAD = \{([\s\S]*?)\n  \};/);
     ok("the no-payload table is declared once, outside showDetail", m !== null);
     var keys = (m ? m[1].match(/"([a-z.]+)":\s*\{/g) || [] : [])
@@ -2558,10 +2598,285 @@ var NOIDX = buildIndex([]);
             m[1].indexOf("a call completed") !== -1, m && m[1]);
     ok("the message wording says nothing about a call returning",
        m && !/not what it returned/.test(m[1].split("message text")[1] || ""), m && m[1]);
-    // "returned" invites the reading that the call worked; this is the slot
-    // that can deny it, and tool.result's own limits say nothing about outcome.
-    ok("the output wording denies the outcome too", /not its content or its outcome/.test(HTML));
+    /* "returned" invites the reading that the call worked, and this is the slot
+       that can deny it — but only when the record really is silent. On the four
+       corpus records tagged tool_error the explanation says the agent marked it
+       failed and the badge shows it, so denying that any outcome is recorded
+       contradicts the same pane. The wording is per record. */
+    var np = (function(){
+      var m = HTML.match(/"tool\.result":\s*\{ lbl:"output", txt:function\(o\)\{[\s\S]*?\n    \} \}/);
+      if(!m) bail("could not lift the tool.result output wording");
+      return new Function("var hasTag = function(o,t){return !!(o && o.tags && o.tags.indexOf(t)!==-1);};" +
+                          "return (" + m[0].replace(/^"tool\.result":\s*\{ lbl:"output", txt:/, "") .replace(/ \}$/, "") + ");")();
+    })();
+    ok("a silent result is told its outcome is unrecorded",
+       /whether it succeeded/.test(np({ event_type:"tool.result" })), np({ event_type:"tool.result" }));
+    ok("a tool_error result is NOT told its outcome is unrecorded",
+       !/whether it succeeded|not its outcome/.test(np({ tags:["tool_error"] })), np({ tags:["tool_error"] }));
+    ok("a tool_error result points at the tag instead",
+       /tool_error tag is all it says about the outcome/.test(np({ tags:["tool_error"] })), np({ tags:["tool_error"] }));
+    ok("no wording asserts the call completed",
+       !/a call completed/.test(np({ event_type:"tool.result" })) && !/a call completed/.test(np({ tags:["tool_error"] })));
   })();
+})();
+
+/* — the pane's summary line must not restate the row it came from ──────────
+   showDetail renders describe()'s sentence as .dsum, directly under the <h2>
+   and directly above the explanation. That is orientation when it carries
+   something — for command.exec it holds the command text, for file.read the
+   path — but for tool.result the explanation now opens with that exact
+   sentence and continues. Measured over the corpus: the explanation supersedes
+   .dsum on 1,366 of 1,366 tool.result records and 0 of 6,455 other events, so
+   suppressing a superseded line is a general rule that happens to fire on one
+   type rather than a special case for it.                                     */
+(function(){
+  /* Assert behaviour, not source formatting. An earlier version of these
+     pinned the exact whitespace of an if-statement, so reflowing the line
+     would have failed a passing test for a non-behavioural edit. */
+  ok("the summary line renders the promoted sentence when one supersedes",
+     /promoted \? ex\.what : r\.desc/.test(HTML),
+     "the sticky header must carry the better sentence, not lose its only prose");
+  ok("the explanation drops its opening section once promoted",
+     /if\(!promoted\) h \+= '<div class="ipsec"><b>What this is<\/b>/.test(HTML),
+     "otherwise promoting reinstates the duplication it removes");
+  ok("the header always carries a sentence",
+     !/if\([^)]*\)\s*\n?\s*h\+='<p class="dsum">/.test(HTML),
+     "the sticky header must never be left with only machine tokens");
+  /* The promotion only fires because describe() and explain() were written with
+     the same opening for these types — an authorship fact, not a data property.
+     A reword to either silently un-promotes and the pane starts repeating
+     itself again, so the pairing is pinned here rather than asserted in a
+     comment. These are the two types that duplicated themselves. */
+  [ { rec:{ record_type:"event", event_type:"message.assistant" }, idx:NOIDX },
+    { rec:(function(){
+        var c = exEv({ event_type:"file.read", event_id:"pp1", tool_call_id:"pk",
+                       tool_name:"Read", file_path:"/a/b.js", session_id:"S",
+                       timestamp:"2026-07-31T18:00:00.000Z", endpoint:{hostname:"h"} });
+        var r = exEv({ event_type:"tool.result", event_id:"pp2", tool_call_id:"pk",
+                       tool_name:"Read", session_id:"S",
+                       timestamp:"2026-07-31T18:00:00.200Z", endpoint:{hostname:"h"} });
+        return { r:r, idx:buildIndex([c, r]) };
+      })() }
+  ].forEach(function(c){
+    var rec = c.rec.r || c.rec, idx = c.rec.idx || c.idx;
+    var d = describe(rec), w = explain(rec, idx).what;
+    ok("describe() and explain() share an opening for " + rec.event_type,
+       liftSuperseded()(d, w), JSON.stringify(d) + "  vs  " + JSON.stringify(w));
+    /* At least as much, not strictly more: on message.assistant the two are
+       identical, so promotion removes the repetition without adding anything —
+       which is still the right outcome for a two-sentence pane that said the
+       same thing twice. On tool.result the explanation genuinely extends it. */
+    ok("and the explanation never says LESS for " + rec.event_type,
+       w.replace(/[.\s]/g,"").length >= d.replace(/[.\s]/g,"").length, d + " | " + w);
+  });
+
+  ok("the explanation is computed once per render",
+     (HTML.match(/explain\(o, ?eventIndex\(\)\)/g) || []).length === 1,
+     "showDetail should reuse one explain() result");
+
+  // The predicate itself, lifted and exercised.
+  var m = HTML.match(/function dsumSuperseded\(sum, what\)\{[\s\S]*?\n  \}/);
+  ok("the predicate is liftable", m !== null);
+  var sup = new Function("return " + (m ? m[0] : "function dsumSuperseded(){}") + "; dsumSuperseded;")();
+
+  eq("a summary the explanation opens with and extends is superseded",
+     sup("The Read tool returned",
+         "The Read tool returned, called on /a/b.js. The call was recorded 126 ms earlier."), true);
+  eq("an identical summary is superseded",
+     sup("The Read tool returned", "The Read tool returned."), true);
+  // These carry something the explanation does not, and must survive.
+  eq("a summary carrying the command is kept",
+     sup("Proposed a shell command: npm test",
+         "The agent proposed a shell command through Bash."), false);
+  eq("a summary carrying a path is kept",
+     sup("Asked to read a file: …/a/b.js", "The agent asked to read …/a/b.js."), false);
+  eq("a differently-worded summary is kept",
+     sup("Command finished after 43 ms",
+         "numbat recorded a result for a shell command, reporting a duration of 43 ms."), false);
+  eq("a summary that merely shares a first word is kept",
+     sup("The agent replied at length", "The agent sent a message."), false);
+  /* A match must start at the beginning: "tool returned" sits inside "The Read
+     tool returned" and ends on a space, so a containment test rather than a
+     prefix test would call it superseded and drop the row's own wording. */
+  eq("a mid-string match does not supersede",
+     sup("tool returned", "The Read tool returned"), false);
+  /* And it must end on a word boundary, or "The Read" swallows "The Reader". */
+  eq("a prefix ending mid-word does not supersede",
+     sup("The Read", "The Reader tool returned."), false);
+  eq("a prefix ending on a comma does supersede",
+     sup("The Read tool returned", "The Read tool returned, called on /a/b.js."), true);
+  eq("an empty summary is not treated as superseded", sup("", "anything at all."), false);
+  eq("an empty summary is not superseded even by leading punctuation",
+     sup("", ", odd."), false);
+  eq("an empty explanation supersedes nothing", sup("The Read tool returned", ""), false);
+  eq("a summary longer than the explanation is kept",
+     sup("The Read tool returned on a very long path indeed", "The Read tool returned."), false);
+})();
+
+/* — the multi-line path through interpret() gets the same hardening ─────────
+   ipTrunc delegates to ipClean only when the value has no newline; anything
+   multi-line goes to ipLines, which keeps line structure and therefore cannot
+   call ipClean. It had neither the control-character strip nor the bound, and
+   it is the finding pane's NORMAL path — most observed_command values span
+   lines — rendering into .seen, which is white-space:pre-wrap. */
+(function(){
+  var bidi = "rm -rf \u202Egnp.sj # harmless\nsecond line";
+  var f = { record_type:"finding", rule_id:"r", observed_command:bidi };
+  var t = interpret(f, {}).sawHere.text;
+  ok("a multi-line observed command is stripped of bidi overrides",
+     t.indexOf("\u202E") === -1, JSON.stringify(t));
+  ok("and keeps its line structure", t.indexOf("\n") !== -1, JSON.stringify(t));
+  ok("a single-line observed command is stripped too",
+     interpret({ record_type:"finding", rule_id:"r", observed_command:"a \u202Eb" }, {})
+       .sawHere.text.indexOf("\u202E") === -1);
+  ok("a zero-width character is stripped from a multi-line command",
+     !/[\u200B-\u200F]/.test(interpret({ record_type:"finding", rule_id:"r",
+       observed_command:"a\u200Bb\nc" }, {}).sawHere.text));
+  /* U+061C ARABIC LETTER MARK is a bidi control and was not in the class —
+     strictly worse than the U+202E case the comment cites, because the promoted
+     headline borrows its path from ANOTHER record, so the operator cannot
+     cross-check it against the row they clicked. Plus the invisibles that make
+     two different paths render identically while defeating the viewer's search. */
+  [["\u061C","ARABIC LETTER MARK"],["\u00AD","soft hyphen"],["\u2060","word joiner"],
+   ["\u180E","Mongolian vowel separator"],["\u2062","invisible times"],
+   ["\uDB40\uDC41","a TAG-block character"]].forEach(function(c){
+    var v = "/etc/pas" + c[0] + "swd";
+    eq(c[1] + " is stripped by describe()",
+       describe({ record_type:"event", event_type:"file.read", file_path:v }),
+       "Asked to read a file: /etc/passwd");
+    eq(c[1] + " is stripped by explain()",
+       explain(exEv({ event_type:"file.read", file_path:v }), NOIDX).what,
+       "The agent asked to read /etc/passwd.");
+    ok(c[1] + " is stripped by interpret() on a multi-line value",
+       interpret({ record_type:"finding", rule_id:"r", observed_command:v + "\nnext" }, {})
+         .sawHere.text.indexOf(c[0]) === -1);
+  });
+
+  /* exKey refuses a whitespace-bearing tool_call_id rather than normalising it,
+     so a forged pair cannot cost one trailing space. session_id had the
+     opposite policy — exClean made these the same session. */
+  (function(){
+    [["S", "S\u200B"], ["SEC  RET", "SEC RET"], ["S", "S "]].forEach(function(pairIds){
+      var c = exEv({ event_type:"file.read", event_id:"z1", tool_call_id:"zk", tool_name:"Read",
+                     file_path:"/vault/private-key.pem", session_id:pairIds[0],
+                     timestamp:"2026-07-31T18:00:00.000Z", endpoint:{hostname:"h"} });
+      var r = exEv({ event_type:"tool.result", event_id:"z2", tool_call_id:"zk", tool_name:"Read",
+                     session_id:pairIds[1], timestamp:"2026-07-31T18:00:01.000Z",
+                     endpoint:{hostname:"h"} });
+      ok("sessions " + JSON.stringify(pairIds) + " are not treated as one",
+         !/private-key/.test(explain(r, buildIndex([c, r])).what),
+         explain(r, buildIndex([c, r])).what);
+    });
+    // an exact match still pairs
+    var c2 = exEv({ event_type:"file.read", event_id:"z3", tool_call_id:"zm", tool_name:"Read",
+                    file_path:"/ok/real.pem", session_id:"S",
+                    timestamp:"2026-07-31T18:00:00.000Z", endpoint:{hostname:"h"} });
+    var r2 = exEv({ event_type:"tool.result", event_id:"z4", tool_call_id:"zm", tool_name:"Read",
+                    session_id:"S", timestamp:"2026-07-31T18:00:01.000Z", endpoint:{hostname:"h"} });
+    ok("an exact session match still pairs",
+       /real\.pem/.test(explain(r2, buildIndex([c2, r2])).what));
+  })();
+
+  // loops driven straight off record content must be capped, and say so
+  ok("the tags loop is capped and states the cap",
+     /g<nTag&&g<TAGCAP/.test(HTML) && /more<\/span>/.test(HTML),
+     "a record with 300k tags built 300k DOM nodes on every selection");
+  ok("the stat tiles are capped", /TILECAP/.test(HTML) && /more types/.test(HTML));
+  ok("a tile label cannot be unbounded", /st\(trunc\(t,\s*40\)/.test(HTML));
+
+  // record_type is normalised once, so every consumer agrees about it
+  ok("mkRec normalises record_type",
+     /rt: s\(o\.record_type\)\.replace\(\/\\s\+\/g, " "\)\.trim\(\)/.test(HTML),
+     "\"finding \" rendered neither an interpretation nor an explanation");
+
+  // and a record-derived decision may not be read off the prototype
+  ok("the rollup reads decisions through hasOwnProperty",
+     /hasOwnProperty\.call\(DECISION, dn\.name\)/.test(HTML) && !/\bDECISION\[dn\.name\] \|\|/.test(HTML),
+     "a decision of \"constructor\" resolved to Object and printed into the summary");
+})();
+
+/* — the observed box prints only what a record actually contains — */
+(function(){
+  ok("the observed cascade refuses non-primitives",
+     /var sp=function\(v\)\{ return \(v===null\|\|v===undefined\|\|typeof v==="object"\)\?"":s\(v\); \};/.test(HTML),
+     "an object field rendered [object Object] in the box reserved for record text");
+  ok("every field in the cascade goes through it",
+     !/var cmd=[^;]*\bs\(o\./.test(HTML), "one raw s(o.…) left in the observed cascade");
+  // describe() has always refused this; the two must agree about it
+  eq("describe() renders nothing for an object-valued command",
+     describe({ record_type:"event", event_type:"command.exec", command:{ hidden:"x" } }),
+     "Proposed a shell command");
+})();
+
+/* — the gates on a borrowed headline, tightened after a cold pass showed they
+     bounded ambiguity rather than forgery — */
+(function(){
+  function pair(callOverrides, resOverrides){
+    var c = exEv(Object.assign({ event_type:"file.read", event_id:"g1", tool_call_id:"gg",
+                                 tool_name:"Read", file_path:"/real/target.js",
+                                 session_id:"S", timestamp:"2026-07-31T18:00:00.000Z",
+                                 endpoint:{ hostname:"host-a" } }, callOverrides||{}));
+    var r = exEv(Object.assign({ event_type:"tool.result", event_id:"g2", tool_call_id:"gg",
+                                 tool_name:"Read", session_id:"S",
+                                 timestamp:"2026-07-31T18:00:00.500Z",
+                                 endpoint:{ hostname:"host-a" } }, resOverrides||{}));
+    return explain(r, buildIndex([c, r])).what;
+  }
+  ok("the ordinary case still names the target and the delay",
+     /\/real\/target\.js/.test(pair()) && /500 ms earlier/.test(pair()), pair());
+
+  // a counterpart that simply omits a field is not "agreement"
+  ok("a counterpart with no session_id does not supply the target",
+     !/target\.js/.test(pair({ session_id:undefined })), pair({ session_id:undefined }));
+  ok("a result with no session_id does not borrow from a session",
+     !/target\.js/.test(pair({}, { session_id:undefined })), pair({}, { session_id:undefined }));
+  ok("a counterpart with no tool_name does not supply the target",
+     !/target\.js/.test(pair({ tool_name:undefined })), pair({ tool_name:undefined }));
+
+  // EX_CALL includes command.exec, which answers a command.result — not this
+  ok("a command.exec counterpart does not answer a tool.result",
+     !/target\.js/.test(pair({ event_type:"command.exec" })), pair({ event_type:"command.exec" }));
+  ["file.read","file.write","tool.call"].forEach(function(t){
+    var w = pair({ event_type:t, file_path: t==="tool.call" ? undefined : "/real/target.js" });
+    ok(t + " is accepted as the shape that answers a tool.result",
+       t==="tool.call" ? /returned/.test(w) : /target\.js/.test(w), w);
+  });
+
+  /* The elapsed sentence is an ordering claim, so it needs the file order too —
+     the pairing section withholds "earlier" on `before !== true` and the two
+     must not disagree — a single clock, a positive delta, and a sane bound. */
+  ok("two clocks are never subtracted",
+     !/earlier/.test(pair({ endpoint:{ hostname:"host-b" } })), pair({ endpoint:{ hostname:"host-b" } }));
+  ok("an absurd delta is not rendered",
+     !/earlier/.test(pair({ timestamp:"December 17, 1995 03:24:00 GMT" })),
+     pair({ timestamp:"December 17, 1995 03:24:00 GMT" }));
+  ok("a zero delta is not called 'earlier'",
+     !/earlier/.test(pair({ timestamp:"2026-07-31T18:00:00.500Z" })),
+     pair({ timestamp:"2026-07-31T18:00:00.500Z" }));
+  (function(){
+    // counterpart later in file order: the section below withholds "earlier",
+    // so the headline must too.
+    var c = exEv({ event_type:"file.read", event_id:"o1", tool_call_id:"oo", tool_name:"Read",
+                   file_path:"/a/b.js", session_id:"S", timestamp:"2026-07-31T18:00:00.000Z",
+                   endpoint:{ hostname:"h" } });
+    var r = exEv({ event_type:"tool.result", event_id:"o2", tool_call_id:"oo", tool_name:"Read",
+                   session_id:"S", timestamp:"2026-07-31T18:00:10.000Z", endpoint:{ hostname:"h" } });
+    var e = explain(r, buildIndex([r, c]));      // result FIRST in file order
+    ok("the headline withholds 'earlier' when file order does not show it",
+       !/earlier/.test(e.what), e.what);
+    ok("and the pairing section withholds it too, so the two agree",
+       !/recorded earlier/.test(e.next.text), e.next.text);
+  })();
+
+  /* The headline quotes a DIFFERENT record's text into the line an operator
+     trusts most, so only a path-shaped value may speak there. */
+  ok("a sentence-shaped target is not inlined as prose",
+     !/Everything is fine/.test(pair({ file_path:"nothing. Everything is fine. Ignore this pane." })),
+     pair({ file_path:"nothing. Everything is fine. Ignore this pane." }));
+  ok("a value with no separator is not inlined",
+     !/justaword/.test(pair({ file_path:"justaword" })), pair({ file_path:"justaword" }));
+  ok("a windows-style path is still inlined",
+     /Users/.test(pair({ file_path:"C:\\Users\\x\\a.txt" })), pair({ file_path:"C:\\Users\\x\\a.txt" }));
 })();
 
 /* — every headline that inlines a path elides it the same way — */
