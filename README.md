@@ -20,11 +20,12 @@ will move; check \`CHANGELOG.md\` for the version this tracks.
 
 | | |
 |---|---|
-| `viewer/viewer.html` | Single-file record viewer: plain-language descriptions, per-event explanation, per-finding interpretation, session rollups, virtual scrolling, query language, timeline scrubbing, cited-event resolution in both directions |
+| `viewer/viewer.html` | Single-file record viewer: plain-language descriptions, an interpretation pane for every record type, session rollups, virtual scrolling, query language, timeline scrubbing, cited-event resolution in both directions |
 | `numbatd/main.go` | ~190-line Go server: serves the viewer and its icon from `-tools`, and whitelisted `*.ndjson` from `-dir`, over loopback only |
 | `numbatd/go.mod` | Module definition — Go 1.16+ refuses to build outside a module, so the tree cannot be built without it |
 | `prune/numbat-prune` | Retention tool: archive-before-delete, atomic replace, never loses a record |
 | `install.sh` | Per-user install, builds the binary, wires launchd |
+| `CLAUDE.md` | The conventions this repo enforces — escaping, network surface, marker boundaries, what may be claimed about a record, how to verify |
 | `tools/gen-rule-catalog.js` | Maintainer tool: regenerates the viewer's embedded rule catalog from numbat's rule YAML. Never needed at runtime |
 | `tools/gen-favicon.py` | Maintainer tool: regenerates `viewer/favicon.png` from the same geometry as the SVG |
 | `test/viewer-logic.js` | Unit tests for the viewer's description, explanation, interpretation and session-rollup logic — `node test/viewer-logic.js`, no dependencies |
@@ -236,6 +237,56 @@ pairs the call side precedes the result side, without exception, which is why a
 the same correction `command.exec` already received. Every bullet in the
 closing section is gated on a field that is actually present; where a field is
 missing the line is omitted rather than guessed.
+
+### Indicator and enforcement panes
+
+The two remaining record types now get the same treatment. Both are explained by
+the records *beside* them, which is why they share `explain()` rather than
+getting a function each: an event is explained by its result, an enforcement by
+the finding it acted on, an indicator by the action its value was lifted out of.
+Findings stay with `interpret()`, because a finding is explained by the rule
+catalog instead.
+
+**Indicators are extractions, not observations.** This is the single thing the
+pane exists to say, so it is the second sentence you read. An indicator is a
+string numbat matched in the *text* of a recorded action — every sample in the
+reference corpus points at a `command.exec` or `command.result` — so
+`ipv4 100.100.54.71` means that address appeared in a proposed `ssh` command,
+not that anything connected to it. The pane **quotes the command it matched
+in**, so you can see that for yourself without leaving the record, and quotes
+nothing at all when the value is not actually in the sample.
+
+`count` is numbat's tally for **one run**, not for the file: 106 indicator
+records in the reference corpus carry only 24 distinct values, one of them
+across 16 separate records each reporting a count of one. The pane says which
+it means. A value still containing an unexpanded `$VAR` or a `YOURNAME`
+placeholder is flagged as a template someone wrote rather than an address
+anything resolved — 16 of the 106 are.
+
+The `type` is assigned by shape, and in this corpus the shape misleads for two
+of the five types, so those carry an explicit caveat:
+
+| type | what it looks like | what it actually was here |
+|---|---|---|
+| `sha1` | a file hash | every one is a **git commit hash** — three are commits in this repository |
+| `email` | an address someone wrote to | an **SSH remote** (`git@github.com`) and a **commit trailer** (`noreply@anthropic.com`) |
+
+Indicators also carry no `session_id` — only `sample_session_id` — so session
+filters and session summaries do not include them. The pane says that too,
+rather than letting you conclude the tool lost them.
+
+**Enforcement records are the thinnest type in the schema.** They carry a
+decision, a mode and a reason, and no severity, title or command at all. Almost
+everything substantive comes from the finding they reference, so `buildIndex()`
+keeps findings by id and the pane resolves the link — showing the rule, its
+title and its severity, and stating plainly that the rating belongs to the
+finding rather than to the decision. An unresolvable finding is still named by
+its id rather than silently dropped.
+
+Where the mode is `monitor`, the pane says numbat *could not* have blocked the
+action, which is a different fact from choosing not to. It claims no ordering
+between the decision and the action it references: every enforcement in the
+corpus does follow its action event, but the record does not have to.
 
 ### Per-finding interpretation
 

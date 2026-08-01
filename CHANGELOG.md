@@ -4,6 +4,173 @@ Releases 0.2.0 through 0.5.0 were tagged retroactively, after the fact, at the
 commit where each version's notes below were completed. Only `v0.1.0` was
 tagged at the time.
 
+## 0.7.0
+
+Every record type now has an interpretation pane, the conventions the code
+enforces are written down, and the same duration no longer reads two ways.
+
+- **`CLAUDE.md`, which never existed.** Every session so far inferred the
+  conventions from the code, and inference failed at least once: `cd39c20`
+  carries a `Co-Authored-By: Claude <noreply@anthropic.com>` trailer. That has a
+  visible consequence — numbat extracted the trailer as an `email` indicator, so
+  the tool's own corpus contains a record whose only cause was a session not
+  knowing the rule. The commit is on `main` and pushed, so it stays; published
+  history is not rewritten to hide it. The file records the workflow, the
+  single-file/no-build constraint, `esc()`/`cls()` as sole escape points, the
+  exact network surface, the claim-only-what-the-record-supports rule, the
+  marker-boundary rule, the no-scope-gate rule, verify-by-execution, and
+  ground-design-in-the-corpus.
+
+- **Indicator and enforcement panes.** The last two record types without one.
+  Both are explained by the records *beside* them, so both live in `explain()`
+  rather than getting a function each — an event is explained by its result, an
+  enforcement by the finding it acted on, an indicator by the action its value
+  was lifted out of. Findings stay with `interpret()`, which is explained by the
+  rule catalog instead.
+
+- **An indicator is an extraction, not an observation.** Every indicator's
+  `sample_event_id` resolves to a `command.exec` or `command.result`, and the
+  value appears in that command's *text*. So `ipv4 100.100.54.71` means the
+  address appeared in a proposed `ssh` command — not that anything connected to
+  it. The pane says that on every indicator and links the sampled occurrence.
+  `describe()` said *Saw email git@github.com*; it now says *Extracted*, because
+  "saw" claimed an observation numbat never made and contradicted the pane one
+  line below it.
+
+- **The `type` is a shape guess, and here the shape lies twice.** All five
+  `sha1` values are git commit hashes — three are commits in this repository,
+  one is the numbat commit embedded in `RULECAT_META`. Both `email` values are
+  an SSH remote and a commit trailer. Those two types now carry an explicit
+  caveat naming the collision; the other three do not, because they do not need
+  one.
+
+- **Enforcement records borrow their substance, and say so.** They carry no
+  severity, title or command. `buildIndex()` gained a `byFinding` map so the
+  pane can resolve `finding_ids` and show the rule, title and severity — and
+  state that the rating belongs to the finding, not to the decision. An
+  unresolvable finding is named by its id rather than dropped. Where the mode is
+  `monitor` the pane says numbat *could not* have blocked the action, which is a
+  different fact from choosing not to. No ordering is claimed between the
+  decision and the action it references, though every enforcement in the corpus
+  does follow its action event.
+
+- **Indicators have no `session_id`,** only `sample_session_id`, so session
+  filters and summaries never include them. The pane says so rather than letting
+  the operator conclude the tool lost them.
+
+- **One duration format, three implementations.** `rvSpan` rendered `4h 27m`
+  beside `dsDur`'s `4 h 27 min` for the same span, and dropped the decimal on
+  short durations — `1.5 s` in one pane, `2s` in another. A marked pure block
+  may not reach across its boundary for a helper, so the duplication is forced;
+  the disagreement was not. All three now share one format, asserted equal
+  across an 18-value table, and `59.999 s` rolls to `1 min` instead of rendering
+  as `60 s`. The unified format also stops discarding data: `2 min 5 s` used to
+  round to `2 min`.
+
+- **An indicator's value had no `OBSERVED` block.** `o.value` was missing from
+  the field chain, so the record's entire substance appeared only in the raw
+  JSON.
+
+Four cold reviewers then read the finished state — coherence, security, honesty
+of claims, actionability — and between them changed both panes substantially.
+
+- **`count` is per-run, not per-file.** The pane said *"numbat recorded one
+  occurrence"* on 106 of 106 indicators. But those 106 records carry only **24
+  distinct values**: every indicator's `run_id` equals its sample event's, and
+  `dashboard.siliconhillstechnology.com` produced **16 separate records, each
+  saying count 1**. The sentence understated by a factor of sixteen while
+  sounding like the tool's own total — and the scoping caveat that would have
+  fixed it was gated on `count > 1`, so the only path this corpus exercises was
+  the one path with no qualification. Both now say the count is numbat's tally
+  *for the run this record covers*.
+
+- **The indicator pane now shows the text it matched in.** Its whole meaning is
+  "this string was in some command", and it never showed which — the operator
+  had to click through and context-switch. It now quotes a slice centred on the
+  match, the way the finding pane has always done, and quotes nothing at all
+  when the value is not actually in the sample rather than quoting something
+  else and calling it the match. 106 of 106 now carry it.
+
+- **The load-bearing denial moved into the headline.** *"It is an extraction,
+  not an observation"* was the third bullet in a list identical on every
+  indicator; it is now the second sentence an operator reads.
+
+- **An unexpanded variable means a template, not an address.** 16 of the 106
+  values still contain `$REF` or `YOURNAME` — they are strings someone wrote,
+  not anything that resolved. Flagged.
+
+- **The session button contradicted the pane beneath it.** `loneSession()`
+  derives its id from the *view* and skips records carrying none, so an
+  indicator — which never carries one — was offered a return to a rollup that
+  provably excludes it, directly above its own caveat saying session summaries
+  do not include it. Reachable for 85 of 106 indicators by an ordinary timeline
+  drag. The button is now gated on the record actually being in that session.
+
+- **The enforcement path had regressed a lesson the same function already
+  learned.** A `finding_id` or `action_event_id` that `exKey()` refuses was
+  dropped with a bare `continue` and the empty result reported as *"the record
+  names no action event"* — a fabricated absence, about ids the record plainly
+  names, 150 lines below the event path's own fix for exactly this. Both are
+  now reported as a limit of the viewer.
+
+- **A decoy finding could choose the severity an operator triages by.**
+  `byFinding` was first-writer-wins with no collision flag, so a `low ·
+  benign.rule` line written earlier in the file displaced `critical ·
+  exfil.credentials` for the same id, and the enforcement's own `rule_ids` were
+  never shown. Collisions are now recorded and disclosed.
+
+- **Three caps were applied silently**, against the invariant `CLAUDE.md`
+  states: 5,000 `action_event_ids` rendered as *"references 20 recorded
+  actions"*. The record's real count is now stated alongside how many were
+  listed.
+
+- **`decision: "block"` under `mode: "monitor"` claimed both "blocked" and
+  "could not have blocked"** in one pane. The record is internally
+  inconsistent; the pane now says so instead of asserting either. Relatedly,
+  `mode: "monitor_mode"` matched nothing and silently dropped the pane's most
+  important caveat — modes are normalised now.
+
+- **`no_override` stopped leaking into English.** The pane said *"numbat did not
+  override this action"* while `describe()` said *"Did not intervene"* one line
+  above, and the rollup printed the raw token `no_override ×5`. All three now
+  say the same thing, and the rollup's enforcement count — the only count in
+  that pane without one — gained a drill-down.
+
+- **`interpret()` and `explain()` worded the same fact two ways**, one click
+  apart, under a comment in `explain()` asserting they could not. A test now
+  pins them equal rather than trusting the comment.
+
+- **The `observed` block was an uncapped render sink.** A 64 MB indicator value
+  cost 3.9 s per selection and re-ran on every arrow-key press. Bounded, with
+  the truncation disclosed. It is also no longer labelled *observed* on a record
+  whose pane exists to say numbat observed nothing.
+
+- Smaller: the header showed `indicator`/`enforcement` twice (heading and chip);
+  the indicator chip used the app's positive colour on a record that establishes
+  nothing; `endpoint.hostname` — *which machine*, a first-order question — was
+  only in the JSON dump; an unresolvable pair link vanished silently while the
+  cited-findings list ten lines below rendered a disabled button for the same
+  case; `describe()` printed *", 1 time"* on all 106 indicator rows and asserted
+  *"Requested a URL"* in a function de-asserted everywhere else; the email
+  caveat cited `git@github.com` as the counter-example on the record whose value
+  *is* `git@github.com`; and `rvCell()`'s parameter shadowed the `cls()`
+  sanitiser inside the one function that builds a class attribute.
+
+- **What the security pass could not break:** no XSS on any new path — a polyglot
+  in every indicator and enforcement field, both text and attribute contexts,
+  produced zero injected nodes and zero dialogs in real Chrome; no prototype
+  pollution, including against a pre-polluted `Object.prototype`; no eval, no new
+  globals, and request interception over a whole session confirmed the network
+  surface is exactly the four documented routes.
+
+- Verified by execution: 783 unit assertions, eleven deliberate mutations —
+  including one that showed a `hasOwnProperty` guard was unobservable through
+  the fields it protects and had to be pinned by its effect on *resolvability*
+  instead, and one that showed asserting a cap *exists* passes with the cap set
+  to 1e12 — all 7,451 non-finding records explained against the real corpus with
+  link and template counts agreeing with independent `jq`, and 31 checks driving
+  real Chrome including `ROW` measured at 29 px in the live DOM.
+
 ## 0.6.0
 
 Events get the treatment findings already had. A finding got four explanatory

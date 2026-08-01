@@ -804,14 +804,22 @@
     var m = u.match(/^[A-Za-z][A-Za-z0-9+.\-]*:\/\/([^\/?#]+)/);
     return m ? dsTrunc(m[1], 60) : dsTrunc(u, 60);
   }
+  /* One duration format, deliberately implemented three times — here, in
+     exDur(), and in rvSpan(). A marked pure block may not reach across its
+     boundary for a helper, so the duplication is forced; the disagreement was
+     not. The rollup used to render "4h 27m" beside this function's "4 h 27 min"
+     for the same span, and dropped the decimal on short durations. A test
+     asserts all three agree across a table, so they cannot drift again. */
   function dsDur(ms){
-    if(ms < 1000) return ms + " ms";
-    if(ms < 60000) return (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + " s";
-    // Cascade past the hour. "267 min" is not a duration anyone reads, and the
-    // rollup renders the same span two panes away as "4h 27m".
-    var min = Math.floor(ms / 60000);
-    if(min < 60) return min + " min";
-    return Math.floor(min / 60) + " h " + (min % 60) + " min";
+    if(typeof ms !== "number" || !isFinite(ms) || ms < 0) return "";
+    if(ms < 1000) return Math.round(ms) + " ms";
+    var sec = Math.round(ms / 1000);
+    // 59.999 s must roll to the next unit rather than render as "60 s".
+    if(sec < 60) return (ms < 10000 ? (ms / 1000).toFixed(1) : String(sec)) + " s";
+    var min = Math.floor(sec / 60), rs = sec % 60;
+    if(min < 60) return rs ? (min + " min " + rs + " s") : (min + " min");
+    var hr = Math.floor(min / 60), rm = min % 60;
+    return hr + " h " + rm + " min";
   }
 
   function dsEvent(o){
@@ -869,8 +877,11 @@
     if(et === "tool.call")   return tool ? "Called the " + tool + " tool" : "Called a tool";
     if(et === "tool.result") return tool ? "The " + tool + " tool returned" : "A tool returned";
     if(et === "network.indicator"){
+      // "Requested" asserts an action. This vocabulary was de-asserted
+      // everywhere else in this function, and explain() spends a caveat saying
+      // an indicator shows no connection was made.
       var h = dsHost(o.url) || dsHost(o.value);
-      return h ? "Requested a URL: " + h : "Requested a URL";
+      return h ? "Matched a URL: " + h : "Matched a URL";
     }
     var ctx = cmd || fp || dsTrunc(o.content_preview, 90) || dsHost(o.url) || tool;
     if(et) return "Recorded a " + dsTrunc(et, 40) + " event" + (ctx ? ": " + ctx : "");
@@ -907,9 +918,16 @@
         return why ? "Enforcement decision" + tail : "Recorded an enforcement decision";
       }
       if(rt === "indicator"){
+        // "Saw" claims numbat observed the thing. It matched the string in the
+        // text of a recorded action — every indicator in the reference corpus
+        // samples a command.exec or command.result — so an email indicator is
+        // an address-shaped substring, not a message. explain() says
+        // "extracted" one line below; these must not disagree.
         var ty = dsTrunc(o.type, 30), val = dsTrunc(o.value, 90), c = dsNum(o.count);
-        var head = "Saw " + (ty ? ty + " " : "") + (val || "an indicator");
-        return c === null ? head : head + ", " + c + " time" + (c === 1 ? "" : "s");
+        var head = "Extracted " + (ty ? ty + " " : "") + (val || "an indicator");
+        // A count of one is the only count in the reference corpus and says
+        // nothing; it cost width on all 106 rows. Report a count that differs.
+        return (c === null || c === 1) ? head : head + ", " + c + " times";
       }
       if(rt === "scan_summary"){
         var st = dsTrunc(o.status, 40);
@@ -1042,7 +1060,7 @@
       // establishes that the agent issued the call, not that nobody asked for it.
       var actor = ipClean(o.observed_actor);
       if(actor === "assistant")
-        limits.push("The agent issued this as a tool call rather than the operator typing it — the operator may still have asked for it or approved it.");
+        limits.push("The agent issued this tool call itself — which does not mean the operator did not ask for it or approve it.");
       else if(actor === "user")
         limits.push("This came from the operator, not the agent.");
 
@@ -1129,12 +1147,17 @@
     return (typeof v === "number" && isFinite(v) && Math.floor(v) === v) ? v : null;
   }
   // Same cascade describe() uses, so the same span reads the same in both.
+  // Byte-identical to dsDur() and rvSpan() by test; see the note on dsDur().
   function exDur(ms){
-    if(ms < 1000) return ms + " ms";
-    if(ms < 60000) return (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + " s";
-    var min = Math.floor(ms / 60000);
-    if(min < 60) return min + " min";
-    return Math.floor(min / 60) + " h " + (min % 60) + " min";
+    if(typeof ms !== "number" || !isFinite(ms) || ms < 0) return "";
+    if(ms < 1000) return Math.round(ms) + " ms";
+    var sec = Math.round(ms / 1000);
+    // 59.999 s must roll to the next unit rather than render as "60 s".
+    if(sec < 60) return (ms < 10000 ? (ms / 1000).toFixed(1) : String(sec)) + " s";
+    var min = Math.floor(sec / 60), rs = sec % 60;
+    if(min < 60) return rs ? (min + " min " + rs + " s") : (min + " min");
+    var hr = Math.floor(min / 60), rm = min % 60;
+    return hr + " h " + rm + " min";
   }
   function exTag(o, tag){
     if(!o || !Array.isArray(o.tags)) return false;
@@ -1147,6 +1170,46 @@
      one pair, and a fabricated pair is a worse failure than no pair — so an
      over-long key is refused entry instead. The longest real tool_call_id in
      the reference corpus is 30 characters and the longest event_id is 51. */
+  function exFindingIsAmbiguous(id, index){
+    var k = exKey(id);
+    if(!k) return false;
+    var m = (index && typeof index === "object" && index.dupFinding &&
+             typeof index.dupFinding === "object") ? index.dupFinding : null;
+    return !!(m && Object.prototype.hasOwnProperty.call(m, k));
+  }
+  function exEventById(id, index){
+    var k = exKey(id);
+    if(!k) return null;
+    var m = (index && typeof index === "object" && index.byEvent &&
+             typeof index.byEvent === "object") ? index.byEvent : null;
+    if(!m || !Object.prototype.hasOwnProperty.call(m, k)) return null;
+    var r = m[k];
+    return (r && typeof r === "object" && !Array.isArray(r)) ? r : null;
+  }
+  /* A slice of `hay` centred on `needle`, so a 5 KB command does not become
+     the pane. Returns "" when the needle is not in the text — an indicator that
+     cannot be located in its own sample must not quote something else and call
+     it the match. */
+  function exWindow(hay, needle, n){
+    var h = exStr(hay), v = exStr(needle);
+    if(!h || !v) return "";
+    var i = h.indexOf(v);
+    if(i < 0) return "";
+    var half = Math.max(0, Math.floor((n - v.length) / 2));
+    var a = Math.max(0, i - half), b = Math.min(h.length, i + v.length + half);
+    return (a > 0 ? "…" : "") + exClean(h.slice(a, b)) + (b < h.length ? "…" : "");
+  }
+
+  function exFindingById(id, index){
+    var k = exKey(id);
+    if(!k) return null;
+    var m = (index && typeof index === "object" && index.byFinding &&
+             typeof index.byFinding === "object") ? index.byFinding : null;
+    if(!m || !Object.prototype.hasOwnProperty.call(m, k)) return null;
+    var n = m[k];
+    return (n && typeof n === "object" && !Array.isArray(n)) ? n : null;
+  }
+
   /* Every one of these tables is looked up with a record-supplied event_type,
      so a bare [] read would let "constructor" or "toString" answer as a known
      type and gate a whole section on. */
@@ -1173,6 +1236,13 @@
     // Null-prototype maps throughout: every key here comes from a record, and
     // "__proto__" is a legal string.
     var pair = Object.create(null), citedBy = Object.create(null), truncated = Object.create(null);
+    // finding_id -> the same note citedBy stores. An enforcement record carries
+    // no severity, no title and no command, so without this it can say almost
+    // nothing about what it acted on.
+    var byFinding = Object.create(null), dupFinding = Object.create(null);
+    // event_id -> the record itself, so an indicator can quote the text its
+    // value was matched in. References only; nothing is copied.
+    var byEvent = Object.create(null);
     var list = Array.isArray(records) ? records : [];
     for(var i = 0; i < list.length; i++){
       var o = list[i];
@@ -1180,6 +1250,8 @@
       var rt = exClean(o.record_type);
 
       if(rt === "event"){
+        var ek2 = exKey(o.event_id);
+        if(ek2 && !byEvent[ek2]) byEvent[ek2] = o;
         var k = exKey(o.tool_call_id);
         if(!k) continue;
         if(!pair[k]) pair[k] = [];
@@ -1188,14 +1260,22 @@
       }
 
       if(rt === "finding"){
-        var ids = o.cited_event_ids;
-        if(!Array.isArray(ids)) continue;
+        var ids = Array.isArray(o.cited_event_ids) ? o.cited_event_ids : [];
         var note = {
           finding: exTrunc(o.finding_id, 120),
           rule:    exTrunc(o.rule_id, 120),
           title:   exTrunc(o.title, 160),
           sev:     exTrunc(o.severity, 30)
         };
+        var fk = exKey(o.finding_id);
+        if(fk){
+          // First writer wins, but the collision is recorded: two findings
+          // sharing an id means the rule and severity shown may be the wrong
+          // one, and silently picking the earlier is how a decoy line chooses
+          // what an operator triages by.
+          if(Object.prototype.hasOwnProperty.call(byFinding, fk)) dupFinding[fk] = 1;
+          else byFinding[fk] = note;
+        }
         for(var j = 0; j < ids.length && j < EX_MAXSCAN; j++){
           var ek = exKey(ids[j]);
           if(!ek) continue;
@@ -1204,7 +1284,8 @@
         }
       }
     }
-    return { pair: pair, citedBy: citedBy, truncated: truncated };
+    return { pair: pair, citedBy: citedBy, truncated: truncated,
+             byFinding: byFinding, byEvent: byEvent, dupFinding: dupFinding };
   }
 
   /* The counterpart record sharing this one's tool_call_id. Identity, not
@@ -1283,10 +1364,220 @@
   };
   var EX_ISRESULT = { "command.result":1, "tool.result":1 };
 
+  /* ── indicator ──────────────────────────────────────────────────────────
+     106 records, and the type most likely to be over-read. An indicator is a
+     string numbat matched in the TEXT of a recorded action — every sample in
+     the reference corpus points at a command.exec or command.result — so it is
+     evidence that a value was written down, not that anything was contacted.
+
+     The classification is by shape, and in this corpus the shape misleads for
+     two of the five types: all five sha1 values are git commit hashes (three
+     are commits in this repository), and the two email values are an SSH
+     remote and a commit-message trailer. Neither is an address anyone wrote
+     to. Those two types therefore carry an explicit shape caveat. */
+  function exIndicator(o, index){
+    var ty  = exTrunc(o.type, 40);
+    var val = exStr(o.value);
+    var cnt = exInt(o.count);                     // not exNum: "2.5 occurrences"
+    var rawSid = exClean(o.sample_event_id), sid = exKey(o.sample_event_id);
+
+    // The load-bearing claim goes in the headline, where the eye lands, rather
+    // than third in a caveat list the reader has learned to skip.
+    var what = "numbat matched this " + (ty || "value") +
+               " in the text of a recorded action. It is an extraction, not an observation.";
+
+    /* What it matched in. An indicator whose whole meaning is "this string was
+       in some command" used to make the operator click through to find out
+       which. The finding pane has carried the equivalent since it was written. */
+    var seen = null;
+    var sample = sid ? exEventById(sid, index) : null;
+    if(sample){
+      var w = exWindow(sample.command, val, 220) ||
+              exWindow(sample.observed_command, val, 220) ||
+              exWindow(sample.file_path, val, 220) ||
+              exWindow(sample.content_preview, val, 220);
+      // Only quote text the value is actually in — quoting something else and
+      // calling it the match would be worse than quoting nothing.
+      if(w) seen = { text: w, from: exTrunc(sample.event_type, 40) };
+    }
+
+    var text, eventId = "";
+    if(sid){
+      eventId = sid;
+      /* count is scoped to ONE RUN, not to the file. 106 indicator records in
+         the reference corpus carry only 24 distinct values — every indicator's
+         run_id equals its sample event's run_id, and one value produced 16
+         separate records each saying count 1. "numbat recorded one occurrence"
+         would understate by a factor of sixteen while sounding like a total. */
+      text = cnt === null
+        ? "The record links one sampled occurrence; it does not say how many there were."
+        : cnt === 0
+          ? "The record counts no occurrences in the run it covers, but still names a sample."
+          : cnt === 1
+            ? "numbat counted one occurrence in the run this record covers, and links it below."
+            : "numbat counted " + cnt + " occurrences in the run this record covers. " +
+              "The record links one sample, not all of them.";
+    } else if(rawSid){
+      // Refused by this viewer, not absent from the record.
+      text = "This record's sample_event_id is not in a form this viewer will match on, so the " +
+             "occurrence was not linked. That is a limit of this viewer, not an absence from the record.";
+    } else {
+      text = "The record names no sample event, so the occurrence cannot be located in this file.";
+    }
+
+    var limits = [];
+    limits.push("It does not show that a connection was made, that anything was sent, or that a file was present.");
+    if(ty === "sha1")
+      limits.push("A 40-character hex string is classified as sha1 by shape alone — a git commit hash has the same shape.");
+    else if(ty === "email")
+      // Naming git@github.com as the counter-example ON git@github.com reads as
+      // a copy-paste rather than a point.
+      limits.push(val === "git@github.com"
+        ? "An address-shaped string is classified as email by shape alone — this one is an SSH remote, not an address anyone wrote to."
+        : "An address-shaped string is classified as email by shape alone — an SSH remote such as git@github.com has the same shape.");
+    // An unexpanded variable means the string is a template someone wrote, not
+    // a value anything resolved: 16 of the 106 in the reference corpus are.
+    if(/\$\{?[A-Za-z_]/.test(val) || /\{\{|%s|YOURNAME|EXAMPLE\.COM/i.test(val))
+      limits.push("This value still contains an unexpanded variable or placeholder, so it is a template that appeared in the text — not an address anything resolved.");
+    if(cnt !== null)
+      limits.push("count is numbat's tally for the run this record covers, not for this file. " +
+                  "The same value produces a separate record per run, so this file may hold several for it.");
+    if(!exClean(o.session_id))
+      limits.push("This record carries no session_id, so session filters and session summaries do not include it. " +
+                  "sample_session_id names only the session of the sampled occurrence.");
+    if(o.redacted === true)
+      limits.push("At least one value on this record was masked before the record was written — not necessarily the one shown above.");
+
+    return { what: what, seen: seen, findings: [], findingsNote: "",
+             next: { label: "Where it was seen", text: text, warn: false, eventId: eventId },
+             limits: limits };
+  }
+
+  /* ── enforcement ────────────────────────────────────────────────────────
+     9 records, and the thinnest type in the schema: no severity, no title, no
+     command. Everything substantive it can say comes from the finding it
+     references, which is why buildIndex() keeps findings by id.
+
+     No ordering is claimed. Every enforcement in the corpus does follow its
+     action event by 7–20 ms, but the record does not have to, and "references"
+     is both true and sufficient. */
+  function exEnforcement(o, index){
+    var dec  = exClean(o.decision), decL = dec.toLowerCase();
+    var mRaw = exTrunc(o.mode, 40);
+    // "monitor" and "monitor_mode" are the same mode. Matching exactly meant a
+    // spelling variant silently dropped the most important caveat on the pane.
+    var mode = exClean(mRaw).toLowerCase().replace(/[\s_-]*mode$/, "");
+    var tool = exTrunc(o.tool_name, 40);
+
+    var blocked = (decL === "deny" || decL === "block" || decL === "blocked");
+    var what;
+    // "did not override" is the schema token no_override wearing English.
+    // describe() says "Did not intervene"; these must not diverge.
+    if(decL === "no_override")            what = "numbat recorded a decision not to intervene.";
+    else if(blocked)                      what = "numbat blocked this action.";
+    else if(decL === "allow" || decL === "allowed") what = "numbat allowed this action to proceed.";
+    else if(dec)                          what = "numbat recorded the decision “" + exTrunc(dec, 40) + "”.";
+    else                                  what = "numbat recorded an enforcement decision.";
+    if(mode) what += " It was running in " + mode + " mode.";
+
+    var acts = Array.isArray(o.action_event_ids) ? o.action_event_ids : [];
+    var ids = [], refusedActs = 0, actsCapped = false;
+    for(var i = 0; i < acts.length; i++){
+      if(i >= EX_MAXSCAN || ids.length >= EX_MAXCITE){ actsCapped = true; break; }
+      var ak = exKey(acts[i]);
+      if(ak) ids.push(ak); else refusedActs++;
+    }
+    var nActs = acts.length;
+    var text;
+    if(ids.length === 1)
+      text = "This decision references one recorded action" + (tool ? ", a " + tool + " tool call." : ".");
+    else if(ids.length > 1)
+      text = "This decision references " + (actsCapped ? nActs : ids.length) + " recorded actions" +
+             (tool ? ", made through " + tool + "." : ".") +
+             (actsCapped ? " This viewer lists the first " + ids.length + "; it links the first of those."
+                         : " The record links the first, not all of them.");
+    else if(refusedActs)
+      // Refused by this viewer, not absent from the record — the distinction
+      // the event path already learned to make.
+      text = refusedActs + (refusedActs === 1 ? " action event id is" : " action event ids are") +
+             " not in a form this viewer will match on, so none was linked. " +
+             "That is a limit of this viewer, not an absence from the record.";
+    else
+      text = "The record names no action event, so what it applies to cannot be located in this file.";
+
+    var fids = Array.isArray(o.finding_ids) ? o.finding_ids : [];
+    var findings = [], anySev = false, nUnresolved = 0, refusedF = 0;
+    var fCapped = false, anyDup = false;
+    for(var j = 0; j < fids.length; j++){
+      if(j >= EX_MAXSCAN || findings.length >= EX_MAXCITE){ fCapped = true; break; }
+      var fk = exKey(fids[j]);
+      if(!fk){ refusedF++; continue; }
+      var n = exFindingById(fk, index);
+      if(n && exClean(n.sev)) anySev = true;
+      if(!n) nUnresolved++;
+      if(exFindingIsAmbiguous(fk, index)) anyDup = true;
+      findings.push({ finding: fk, rule: n ? (n.rule || "") : "",
+                      title: n ? (n.title || "") : "", sev: n ? (n.sev || "") : "" });
+    }
+    var findingsNote = findings.length === 1 ? "the finding this decision references"
+                     : findings.length > 1
+                       ? (fCapped ? "the first " + findings.length + " of " + fids.length +
+                                    " findings this decision references"
+                                  : "the " + findings.length + " findings this decision references")
+                       : "";
+
+    var limits = [];
+    if(mode === "monitor" && blocked)
+      // Asserting both "blocked" and "could not have blocked" is worse than
+      // saying neither. The record is internally inconsistent; say that.
+      limits.push("The decision and the mode disagree — the decision records a block, but monitor mode does not block. " +
+                  "This record does not establish which happened.");
+    else if(mode === "monitor")
+      limits.push("In monitor mode numbat reports without blocking, so this decision could not have stopped the action.");
+    limits.push("This record shows what numbat decided. It does not show what the agent did next, or whether the action ran.");
+    if(anySev)
+      limits.push("This decision record carries no severity of its own; the rating shown above belongs to the finding it references.");
+    if(nUnresolved){
+      // rule_ids[0] is not known to belong to the UNRESOLVED finding — pinning
+      // it there invents an association the record never made.
+      var rules = Array.isArray(o.rule_ids) ? o.rule_ids : [];
+      limits.push((findings.length === 1 && rules.length === 1)
+        ? "The record names rule " + exTrunc(rules[0], 80) + ", but the finding it refers to is not in this file."
+        : nUnresolved === 1
+          ? "One finding this decision references is not in this file."
+          : nUnresolved + " findings this decision references are not in this file.");
+    }
+    if(anyDup)
+      limits.push("More than one finding in this file carries an id this decision references, " +
+                  "so the rule and severity shown above may belong to a different one.");
+    if(refusedF)
+      limits.push(refusedF + (refusedF === 1 ? " finding id is" : " finding ids are") +
+                  " not in a form this viewer will match on, so " +
+                  (refusedF === 1 ? "it was" : "they were") + " not resolved. " +
+                  "That is a limit of this viewer, not an absence from the record.");
+    var reason = exClean(o.reason);
+    if(reason && reason.toLowerCase() !== mode && reason.replace(/_/g, " ").toLowerCase() !== mode + " mode")
+      limits.push("The record gives the reason as “" + exTrunc(reason, 60) + "”.");
+    if(o.redacted === true)
+      limits.push("At least one value on this record was masked before the record was written — not necessarily the one shown above.");
+
+    return { what: what, seen: null, findings: findings, findingsNote: findingsNote,
+             next: { label: "What it applies to", text: text, warn: false,
+                     eventId: ids.length ? ids[0] : "" },
+             limits: limits };
+  }
+
   function explain(o, index){
     try {
       if(o === null || typeof o !== "object" || Array.isArray(o)) return null;
-      if(exClean(o.record_type) !== "event") return null;
+      var rt = exClean(o.record_type);
+      // interpret() owns findings, because a finding is explained by its rule
+      // catalog. explain() owns the record types that are explained by the
+      // records BESIDE them: an event by its result, an enforcement by its
+      // finding, an indicator by the action its value was lifted out of.
+      if(rt === "indicator")   return exIndicator(o, index);
+      if(rt === "enforcement") return exEnforcement(o, index);
+      if(rt !== "event") return null;
 
       var et   = exClean(o.event_type);
       var tool = exTrunc(o.tool_name, 40);
@@ -1537,11 +1828,15 @@
       if(o.redacted === true)
         limits.push("At least one value on this record was masked before the record was written — not necessarily the one shown above.");
 
-      return { what: what, next: next, findings: findings, limits: limits };
+      return { what: what, next: next, findings: findings,
+               findingsNote: !findings.length ? ""
+                           : findings.length === 1 ? "this event is cited by 1 finding"
+                           : "this event is cited by " + findings.length + " findings",
+               limits: limits };
     } catch(e){
       // A record that defeats every guard above still gets a pane.
-      return { what: "numbat recorded an event this viewer could not read.",
-               next: null, findings: [], limits: [] };
+      return { what: "numbat recorded a record this viewer could not read.",
+               next: null, findings: [], findingsNote: "", limits: [] };
     }
   }
   /* [explain:end] */
@@ -2198,6 +2493,11 @@
     var h = '<span class="lbl">explanation</span><div class="note">';
     h += '<div class="ipsec"><b>What this is</b><br>'+esc(ex.what)+'</div>';
 
+    if(ex.seen){
+      h += '<div class="ipsec"><b>What it matched in</b>'+
+           (ex.seen.from ? ' <span class="qual">— '+esc(ex.seen.from)+'</span>' : '')+
+           '<br><span class="seen">'+esc(ex.seen.text)+'</span></div>';
+    }
     if(ex.next){
       h += '<div class="ipsec"><b>'+esc(ex.next.label)+'</b>'+
            (ex.next.warn ? ' <span class="warn">— the agent marked this one failed</span>' : '')+
@@ -2207,14 +2507,16 @@
       // events the same way.
       if(ex.next.eventId){
         var pt = findEid(ex.next.eventId);
-        if(pt >= 0) h += '<button type="button" class="btn jump" data-t="'+pt+'" title="'+esc(ex.next.eventId)+'">→ '+esc(ex.next.eventId)+'</button>';
+        h += '<button type="button" class="btn jump" data-t="'+(pt>=0?pt:"")+'"'+
+             (pt<0?' disabled title="Not in this file — recapture with --emit all"':' title="'+esc(ex.next.eventId)+'"')+
+             '>'+(pt>=0?"→ ":"✕ ")+esc(ex.next.eventId)+'</button>';
       }
       h += '</div>';
     }
 
     if(ex.findings.length){
-      h += '<div class="ipsec"><b>Related findings</b> <span class="qual">— this event is cited by '+
-           esc(ex.findings.length)+' finding'+(ex.findings.length===1?'':'s')+'</span>';
+      h += '<div class="ipsec"><b>Related findings</b>'+
+           (ex.findingsNote ? ' <span class="qual">— '+esc(ex.findingsNote)+'</span>' : '')+'';
       for(var i=0;i<ex.findings.length;i++){
         var f = ex.findings[i], t = findFid(f.finding);
         var label = (f.sev ? f.sev+' · ' : '')+(f.rule || f.finding || 'finding')+
@@ -2281,23 +2583,28 @@
     return sid;
   }
 
+  // Byte-identical to dsDur() and exDur() by test; see the note on dsDur().
   function rvSpan(ms){
-    if(typeof ms !== "number" || !isFinite(ms)) return "";
-    if(ms < 1000) return ms + " ms";
+    if(typeof ms !== "number" || !isFinite(ms) || ms < 0) return "";
+    if(ms < 1000) return Math.round(ms) + " ms";
     var sec = Math.round(ms / 1000);
-    if(sec < 60) return sec + "s";
+    // 59.999 s must roll to the next unit rather than render as "60 s".
+    if(sec < 60) return (ms < 10000 ? (ms / 1000).toFixed(1) : String(sec)) + " s";
     var min = Math.floor(sec / 60), rs = sec % 60;
-    if(min < 60) return min + "m " + rs + "s";
+    if(min < 60) return rs ? (min + " min " + rs + " s") : (min + " min");
     var hr = Math.floor(min / 60), rm = min % 60;
-    return hr + "h " + rm + "m";
+    return hr + " h " + rm + " min";
   }
   // A count the operator cannot reach is a dead end, so every tile that can
   // name the records behind it becomes a button carrying the query that
   // selects them. data-q is escaped like any other attribute value.
-  function rvCell(v, label, cls, q){
+  function rvCell(v, label, klass, q){
     var body = '<b>'+esc(typeof v === "number" ? v.toLocaleString() : v)+'</b><i>'+esc(label)+'</i>';
-    return q ? '<button type="button" class="rucell act '+(cls||"")+'" data-q="'+esc(q)+'" title="Show these records">'+body+'</button>'
-             : '<div class="rucell '+(cls||"")+'">'+body+'</div>';
+    // Parameter deliberately NOT named cls: this is the one function that
+    // builds a class attribute, and shadowing the sanitiser here is how the
+    // first record-derived caller would silently lose its escaping.
+    return q ? '<button type="button" class="rucell act '+(klass||"")+'" data-q="'+esc(q)+'" title="Show these records">'+body+'</button>'
+             : '<div class="rucell '+(klass||"")+'">'+body+'</div>';
   }
   function rvNames(arr, n){
     var parts = [];
@@ -2333,6 +2640,13 @@
   /* "ended" in the app's success colour reads as "finished its work"; all the
      record establishes is that a root session.end exists. The state is named
      after the record, and only the genuinely incomplete states take a colour. */
+  // One phrasing for a decision token, shared by the rollup and the row list.
+  var DECISION = {
+    no_override: "did not intervene", monitor: "did not intervene", observe: "did not intervene",
+    deny: "blocked", block: "blocked", blocked: "blocked",
+    allow: "allowed", allowed: "allowed"
+  };
+
   var LIFE = {
     ended:      { t:"session.end recorded", c:"" },
     open:       { t:"no end recorded",      c:"wa" },
@@ -2474,9 +2788,21 @@
     }
 
     if(r.enforcement.total){
-      h += '<span class="lbl">enforcement</span><div class="ruline"><b>'+
+      // rollup() returns the decision token as the record spells it; putting
+      // "no_override" in front of an operator is the schema leaking. The same
+      // words describe() and explain() use, and a drill-down like every other
+      // count in this pane.
+      var decs = [];
+      for(var dq = 0; dq < r.enforcement.decisions.length && dq < 4; dq++){
+        var dn = r.enforcement.decisions[dq];
+        decs.push(DECISION[dn.name] || dn.name.replace(/_/g, " "));
+        if(dn.count > 1) decs[decs.length-1] += " ×" + dn.count;
+      }
+      if(r.enforcement.decisions.length > 4) decs.push("+" + (r.enforcement.decisions.length - 4) + " more");
+      h += '<span class="lbl">enforcement</span><div class="ruline"><button type="button" class="btn lnk" data-q="'+
+           esc("session:" + r.id + " type:enforcement")+'"><b>'+
            esc(r.enforcement.total.toLocaleString())+'</b> decision'+(r.enforcement.total===1?"":"s")+
-           ' · '+esc(rvNames(r.enforcement.decisions, 4))+'</div>';
+           ' · '+esc(decs.join(", "))+'</button></div>';
     }
 
     if(r.subAgents.length){
@@ -2634,16 +2960,26 @@
        explanation this pane exists to show below the fold on every selection,
        and cost a rollup render per arrow-key press. This is one line, always in
        the same place, and it only appears when there is a session to go back to. */
+    /* Only offer the way back when THIS record is actually in that session.
+       loneSession() derives the sid from the view and skips records that carry
+       none, so an indicator — which never carries one — used to get a button
+       to a rollup that provably excludes it, directly above its own caveat
+       saying session summaries do not include it. */
     var loneSid=loneSession();
+    if(loneSid && r.sid !== loneSid) loneSid="";
     if(loneSid)
       h+='<button type="button" class="btn lnk" id="backSess" title="Back to the summary for this session">← session '+esc(loneSid)+' summary</button>';
-    h+='<h2>'+esc(r.rule||r.etype||r.rt)+'</h2>';
+    // indicator and enforcement carry neither rule_id nor event_type, so this
+    // fell through to the record type — printed again as a chip one line below.
+    h+='<h2>'+esc(r.rule||r.etype||s(o.type)||s(o.decision)||r.rt)+'</h2>';
     h+='<p class="dsum">'+esc(r.desc)+'</p><div class="dmeta">';
-    h+=tag(r.rt,r.rt==="finding"?"hi":r.rt==="indicator"?"ok":"");
+    h+=tag(r.rt,r.rt==="finding"?"hi":"");
     if(r.sev) h+=tag(r.sev,(r.sev==="high"||r.sev==="critical")?"hi":r.sev==="medium"?"wa":"");
     if(o.confidence) h+=tag("conf "+s(o.confidence),"");
     if(r.agent) h+=tag(r.agent,"");
     if(o.source_type) h+=tag(s(o.source_type),"");
+    if(o.endpoint&&typeof o.endpoint==="object"&&!Array.isArray(o.endpoint)&&o.endpoint.hostname)
+      h+=tag(trunc(s(o.endpoint.hostname),60),"");
     if(r.ts){
       var tz=tzName();
       h+=tag(r.tms ? fmtLocal(r.tms)+(tz?" "+tz:"") : r.ts.replace("T"," ").slice(0,19),"");
@@ -2652,9 +2988,19 @@
     if(o.title) h+='<span class="lbl">title</span><div style="font-size:13.5px;line-height:1.55">'+esc(s(o.title))+'</div>';
     if(o.description) h+='<span class="lbl">description</span><div style="font-size:12.5px;line-height:1.6;color:var(--dim)">'+esc(s(o.description))+'</div>';
     if(r.rt==="finding") h+=ipRender(interpret(o,RULECAT));
-    else if(r.rt==="event") h+=exRender(explain(o,eventIndex()));
-    var cmd=s(o.command)||s(o.observed_command)||s(o.content_preview)||s(o.url)||s(o.file_path)||s(o.observed_file_path)||s(o.message);
-    if(cmd) h+='<span class="lbl">observed</span><div class="cmd">'+esc(cmd)+'</div>';
+    else h+=exRender(explain(o,eventIndex()));   // event, indicator, enforcement
+    var cmd=s(o.command)||s(o.observed_command)||s(o.content_preview)||s(o.url)||s(o.value)||s(o.file_path)||s(o.observed_file_path)||s(o.message);
+    if(cmd){
+      // Bounded like every other record-derived render path: this is fed
+      // straight from record content and had no cap at all.
+      var OBSCAP=40000, cut=cmd.length>OBSCAP;
+      // "observed" is the wrong word for an indicator, whose pane exists to say
+      // numbat observed nothing — it matched a string in someone else's text.
+      h+='<span class="lbl">'+(r.rt==="indicator"?"extracted value":"observed")+'</span>'+
+         '<div class="cmd">'+esc(cut?cmd.slice(0,OBSCAP):cmd)+
+         (cut?'\n\n… '+esc((cmd.length-OBSCAP).toLocaleString())+' more characters, in the full record below':'')+
+         '</div>';
+    }
     if(Array.isArray(o.cited_event_ids)&&o.cited_event_ids.length){
       // Capped, and the cap is stated. This loop is driven straight off record
       // content and used to be unbounded: a finding citing 2,000,000 events —

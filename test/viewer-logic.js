@@ -136,7 +136,7 @@ eq("event/tool.call names an MCP tool",
 eq("event/network.indicator reduces a URL to its host",
    describe({ record_type:"event", event_type:"network.indicator",
               url:"https://evil.example.com/a/b?c=d#e" }),
-   "Requested a URL: evil.example.com");
+   "Matched a URL: evil.example.com");
 
 eq("finding pairs title with rule",
    describe({ record_type:"finding", title:"Credential exfiltration chain", rule_id:"chain.exfil.01" }),
@@ -181,11 +181,18 @@ eq("a rule_ids array of nulls does not fabricate a rule",
 
 eq("indicator counts occurrences",
    describe({ record_type:"indicator", type:"domain", value:"api.supabase.com", count:3 }),
-   "Saw domain api.supabase.com, 3 times");
+   "Extracted domain api.supabase.com, 3 times");
 
-eq("indicator singularises a count of one",
+// describe() and explain() must not disagree about what an indicator is: one
+// says it in the row, the other in the pane directly below it.
+ok("describe() does not claim numbat observed the indicator itself",
+   !/\bSaw\b/.test(describe({ record_type:"indicator", type:"email", value:"git@github.com", count:1 })));
+
+// ", 1 time" was on 106 of 106 indicator rows and never distinguished any of
+// them; a count that differs from one still earns its width.
+eq("a count of one is not printed",
    describe({ record_type:"indicator", type:"url", value:"https://x.test/y", count:1 }),
-   "Saw url https://x.test/y, 1 time");
+   "Extracted url https://x.test/y");
 
 eq("scan_summary",
    describe({ record_type:"scan_summary", status:"clean" }),
@@ -205,9 +212,11 @@ eq("sub-second duration stays in milliseconds",
    describe({ record_type:"event", event_type:"command.result", duration_ms:43 }),
    "Command finished after 43 ms");
 
-eq("multi-minute duration rounds to minutes",
+// It used to round to "2 min", silently discarding the 5 seconds the record
+// carries. A forensic tool should not round away data it was given.
+eq("a multi-minute duration keeps its seconds",
    describe({ record_type:"event", event_type:"command.result", duration_ms:125000 }),
-   "Command finished after 2 min");
+   "Command finished after 2 min 5 s");
 
 eq("command.result with neither exit code nor duration claims nothing",
    describe({ record_type:"event", event_type:"command.result" }),
@@ -230,7 +239,7 @@ ok("command.result never invents success when there is no exit code",
 eq("a record with only record_type still describes itself (finding)",
    describe({ record_type:"finding" }), "Recorded a finding");
 eq("a record with only record_type still describes itself (indicator)",
-   describe({ record_type:"indicator" }), "Saw an indicator");
+   describe({ record_type:"indicator" }), "Extracted an indicator");
 eq("a record with only record_type still describes itself (scan_summary)",
    describe({ record_type:"scan_summary" }), "Scan finished");
 eq("a record with only record_type still describes itself (enforcement)",
@@ -520,9 +529,20 @@ eq("interpret() declines an enforcement record", interpret({ record_type:"enforc
   // (hook.go:995), so the record establishes that the agent issued the call —
   // not that the operator did not ask for it.
   ok("an assistant actor says the agent issued it",
-     a.limits.join(" ").indexOf("issued this as a tool call") !== -1, JSON.stringify(a.limits));
+     a.limits.join(" ").indexOf("issued this tool call itself") !== -1, JSON.stringify(a.limits));
   ok("an assistant actor does not deny operator involvement",
-     a.limits.join(" ").indexOf("may still have asked for it") !== -1, JSON.stringify(a.limits));
+     a.limits.join(" ").indexOf("does not mean the operator did not ask for it") !== -1, JSON.stringify(a.limits));
+  /* interpret() and explain() are one click apart — every finding links its
+     cited events, every cited event links back. The same fact must not arrive
+     in two voices, and a comment in explain() asserts it does not. */
+  (function(){
+    var ipSaid = a.limits.filter(function(l){ return /issued this tool call/.test(l); })[0] || "";
+    var exSaid = (explain({ record_type:"event", event_type:"command.exec", actor:"assistant" },
+                          buildIndex([])).limits || [])
+                 .filter(function(l){ return /issued this tool call/.test(l); })[0] || "";
+    eq("interpret() and explain() word the actor fact identically", exSaid, ipSaid);
+    ok("and that wording is non-empty", ipSaid.length > 0, ipSaid);
+  })();
   ok("a user actor attributes it to the operator",
      u.limits.join(" ").indexOf("came from the operator") !== -1, JSON.stringify(u.limits));
   ok("a system actor claims neither", s.limits.join(" ").indexOf("operator") === -1, JSON.stringify(s.limits));
@@ -1331,9 +1351,64 @@ function noteMatching(r, re){
   eq("describe() renders a multi-hour duration readably",
      describe({ record_type:"event", event_type:"command.result", duration_ms:16020000 }),
      "Command finished after 4 h 27 min");
-  eq("describe() still renders sub-hour durations in minutes",
+  eq("describe() keeps the seconds a sub-hour duration carries",
      describe({ record_type:"event", event_type:"command.result", duration_ms:150000 }),
+     "Command finished after 2 min 30 s");
+  eq("describe() omits a zero seconds component",
+     describe({ record_type:"event", event_type:"command.result", duration_ms:120000 }),
      "Command finished after 2 min");
+})();
+
+/* — one duration format, three implementations ─────────────────────────────
+   dsDur, exDur and rvSpan live in three different scopes: two inside marked
+   pure blocks that may not share a helper across a boundary, one in the render
+   code. The duplication is forced. What is NOT forced is disagreement — the
+   rollup used to render 4h 27m beside describe()'s 4 h 27 min for the same
+   span, and rvSpan dropped the decimal on short durations while dsDur kept it.
+   These must agree exactly, so the same number never reads two ways. */
+(function(){
+  function lift(name, block){
+    var src = block ? blockSrc(block) : HTML;
+    var m = src.match(new RegExp("function\\s+" + name + "\\s*\\(ms\\)\\{[\\s\\S]*?\\n  \\}"));
+    if(!m) bail("could not lift " + name + "() for the duration-agreement test");
+    return new Function("return " + m[0] + "; " + name + ";")();
+  }
+  var dsDur  = lift("dsDur",  "describe");
+  var exDur  = lift("exDur",  "explain");
+  var rvSpan = lift("rvSpan", null);
+
+  var CASES = [
+    [0,         "0 ms"],
+    [43,        "43 ms"],
+    [999,       "999 ms"],
+    [1000,      "1.0 s"],
+    [1500,      "1.5 s"],
+    [1900,      "1.9 s"],
+    [9999,      "10.0 s"],
+    [10000,     "10 s"],
+    [43000,     "43 s"],
+    // 59.999 s must not render as "60 s"; it rolls to the next unit.
+    [59999,     "1 min"],
+    [60000,     "1 min"],
+    [90000,     "1 min 30 s"],
+    [120000,    "2 min"],
+    [150000,    "2 min 30 s"],
+    [600000,    "10 min"],
+    [3599000,   "59 min 59 s"],
+    [3600000,   "1 h 0 min"],
+    [16020000,  "4 h 27 min"]
+  ];
+  CASES.forEach(function(c){
+    eq("dsDur("  + c[0] + ")", dsDur(c[0]),  c[1]);
+    eq("exDur("  + c[0] + ")", exDur(c[0]),  c[1]);
+    eq("rvSpan(" + c[0] + ")", rvSpan(c[0]), c[1]);
+  });
+
+  // rvSpan is the only one that takes untrusted input directly; it must still
+  // refuse a non-number rather than rendering "NaN ms".
+  eq("rvSpan rejects a non-number", rvSpan("nope"), "");
+  eq("rvSpan rejects NaN", rvSpan(NaN), "");
+  eq("rvSpan rejects Infinity", rvSpan(Infinity), "");
 })();
 
 /* — record-derived map keys are unbounded in the record; bound them at entry so
@@ -1497,8 +1572,18 @@ var NOIDX = buildIndex([]);
 
 /* — shape and total function — */
 (function(){
-  eq("explain() declines a finding", explain({ record_type:"finding", rule_id:"x" }, NOIDX), null);
-  eq("explain() declines an indicator", explain({ record_type:"indicator", type:"url" }, NOIDX), null);
+  /* The division of labour: interpret() owns findings, because a finding is
+     explained by the rule catalog. explain() owns the record types explained by
+     the records BESIDE them — an event by its result, an enforcement by its
+     finding, an indicator by the action its value was lifted out of. */
+  eq("explain() declines a finding — interpret() owns those",
+     explain({ record_type:"finding", rule_id:"x" }, NOIDX), null);
+  ok("explain() handles an indicator",
+     !!(explain({ record_type:"indicator", type:"url" }, NOIDX) || {}).what);
+  ok("explain() handles an enforcement",
+     !!(explain({ record_type:"enforcement", decision:"deny" }, NOIDX) || {}).what);
+  eq("explain() declines a record type it has no branch for",
+     explain({ record_type:"scan_summary", status:"ok" }, NOIDX), null);
   eq("explain() declines a non-object", explain("nope", NOIDX), null);
   eq("explain() declines null", explain(null, NOIDX), null);
   eq("explain() declines an array", explain([], NOIDX), null);
@@ -1976,6 +2061,358 @@ var NOIDX = buildIndex([]);
   buildIndex([cf]);
   ok("a __proto__ citation key does not pollute the prototype",
      Object.prototype.polluted === undefined && !Array.isArray(Object.prototype.cited));
+})();
+
+/* — indicator records ──────────────────────────────────────────────────────
+   106 of them, and they were the last record type with no interpretation at
+   all. The corpus facts that shape this, each verified with jq before being
+   written down:
+     · every indicator's sample_event_id resolves to a command.exec or a
+       command.result, so an indicator is a string lifted out of command TEXT
+     · all five sha1 values are git commit hashes — three are commits in this
+       very repository, and one is the numbat commit in RULECAT_META
+     · the two email values are "git@github.com" (an SSH remote) and
+       "noreply@anthropic.com" (a commit-message trailer)
+     · the one ipv4 came from `ssh ubuntu@100.100.54.71 …` — a PROPOSED command
+     · count is 1 and first_seen === last_seen on all 106
+   So the type is a shape guess, and nothing here shows a connection, a
+   message, or a file.                                                        */
+(function(){
+  function ind(o){ o.record_type = "indicator"; return o; }
+  function ex(o, idx){ return explain(ind(o), idx || NOIDX); }
+
+  var e = ex({ type:"domain", value:"api.supabase.com", count:1,
+               sample_event_id:"s1", sample_session_id:"sess",
+               first_seen:"2026-07-31T17:27:09Z", last_seen:"2026-07-31T17:27:09Z" });
+  ok("an indicator is explained at all", !!(e && e.what && e.what.length), JSON.stringify(e));
+  ok("an indicator is described as an extraction, not an observation",
+     /extraction, not an observation/.test(e.what), e.what);
+  ok("the load-bearing denial is in the headline, not buried in the caveats",
+     /matched this domain in the text of a recorded action/.test(e.what), e.what);
+  ok("the headline names the indicator's type", /domain/.test(e.what), e.what);
+
+  // The single most important claim this pane makes.
+  var lim = e.limits.join(" | ");
+  ok("an indicator denies establishing a connection",
+     /does not show that a connection was made/.test(lim), lim);
+  ok("an indicator denies establishing a transmission or a file",
+     /sent|present/.test(lim), lim);
+
+  // Type is assigned by shape. For two of the five types in this corpus the
+  // shape is actively misleading, so the pane says so.
+  ok("sha1 warns that a git commit hash has the same shape",
+     /git commit hash/.test(ex({ type:"sha1", value:"ce0914a8b1ff347a5bb44894d01ac8e847872e7e", count:1 }).limits.join(" ")));
+  ok("email warns that an SSH remote has the same shape",
+     /SSH remote/.test(ex({ type:"email", value:"git@github.com", count:1 }).limits.join(" ")));
+  ok("a domain gets no shape caveat it does not need",
+     !/git commit|SSH remote/.test(ex({ type:"domain", value:"x.com", count:1 }).limits.join(" ")));
+
+  // Indicators carry no session_id, only sample_session_id, so they never
+  // appear in a session rollup or a session: filter. Say so rather than
+  // letting the operator conclude the tool lost them.
+  ok("an indicator explains why session filters miss it",
+     /no session_id/.test(lim), lim);
+
+  // The sample link.
+  eq("an indicator points at its sample occurrence", e.next.label, "Where it was seen");
+  eq("the sample event is offered as a link", e.next.eventId, "s1");
+  ok("a single occurrence is stated as one", /one occurrence/.test(e.next.text), e.next.text);
+
+  var many = ex({ type:"url", value:"https://x/y", count:7, sample_event_id:"s2" });
+  ok("a repeated indicator reports its count", /7/.test(many.next.text), many.next.text);
+  ok("a repeated indicator says the link is only a sample",
+     /not all of them/.test(many.next.text), many.next.text);
+  // count is per-RUN: 106 indicator records in the reference corpus carry only
+  // 24 distinct values, one of them across 16 separate records each saying 1.
+  ok("a repeated indicator scopes its count to the run",
+     /tally for the run this record covers, not for this file/.test(many.limits.join(" ")),
+     many.limits.join(" | "));
+  ok("the run scoping is present on a count of one too — the common path",
+     /tally for the run this record covers/.test(e.limits.join(" ")), e.limits.join(" | "));
+  ok("a count of one is scoped to the run, not stated as a total",
+     /counted one occurrence in the run this record covers/.test(e.next.text), e.next.text);
+
+  var nolink = ex({ type:"domain", value:"x.com", count:1 });
+  ok("an indicator with no sample says so rather than inventing a link",
+     nolink.next !== null && /names no sample event/.test(nolink.next.text), JSON.stringify(nolink.next));
+  eq("an indicator with no sample offers no link", nolink.next.eventId, "");
+
+  // Degenerate shapes.
+  ok("an indicator with only record_type still explains itself",
+     !!explain({ record_type:"indicator" }, NOIDX).what);
+  ok("an all-null indicator still explains itself",
+     !!explain({ record_type:"indicator", type:null, value:null, count:null,
+                 sample_event_id:null, first_seen:null, last_seen:null }, NOIDX).what);
+  ok("an indicator with no type makes no shape claim",
+     !/git commit|SSH remote/.test(explain({ record_type:"indicator", value:"x" }, NOIDX).limits.join(" ")));
+})();
+
+/* — enforcement records ────────────────────────────────────────────────────
+   Only 9, and they carry no severity, no title and no command — so without
+   their linked finding they can say almost nothing. All 9 in the corpus are
+   decision "no_override", mode "monitor", reason "monitor_mode", each naming
+   exactly one rule, one finding and one action event, all of which resolve.  */
+(function(){
+  function enf(o){ o.record_type = "enforcement"; return o; }
+
+  var finding = { record_type:"finding", finding_id:"fnd-1",
+                  rule_id:"tamper.detector_state_write", severity:"high",
+                  title:"Agent targeted numbat's default state directory",
+                  cited_event_ids:["ev-1"] };
+  var action  = { record_type:"event", event_type:"command.exec", event_id:"ev-1",
+                  tool_call_id:"tc1", command:"rm -rf ~/.numbat" };
+  var rec = enf({ decision:"no_override", mode:"monitor", reason:"monitor_mode",
+                  rule_ids:["tamper.detector_state_write"], finding_ids:["fnd-1"],
+                  action_event_ids:["ev-1"], tool_name:"Bash",
+                  decision_id:"enf-1", source_type:"hook" });
+  var idx = buildIndex([rec, finding, action]);
+  var e = explain(rec, idx);
+
+  ok("an enforcement is explained at all", !!(e && e.what && e.what.length), JSON.stringify(e));
+  // "did not override" is the schema token no_override wearing English;
+  // describe() says "Did not intervene" for the same record one line above.
+  ok("no_override is stated in the same words describe() uses",
+     /decision not to intervene/.test(e.what), e.what);
+  ok("the schema token does not leak into the prose", !/override/.test(e.what), e.what);
+  ok("the headline names the mode it was running in", /monitor/.test(e.what), e.what);
+
+  // The whole point: an enforcement borrows its substance from its finding.
+  eq("the linked finding is resolved", e.findings.length, 1);
+  eq("the finding's rule is carried over", e.findings[0].rule, "tamper.detector_state_write");
+  eq("the finding's severity is carried over", e.findings[0].sev, "high");
+  eq("the finding's title is carried over", e.findings[0].title,
+     "Agent targeted numbat's default state directory");
+  ok("the findings section is labelled for a decision, not for an event",
+     /decision/.test(e.findingsNote || ""), e.findingsNote);
+  ok("the findings label claims reference, not action",
+     /references/.test(e.findingsNote || "") && !/acted on/.test(e.findingsNote || ""), e.findingsNote);
+
+  // Severity is not the enforcement's own, and saying so prevents the reader
+  // attributing the finding's rating to numbat's decision.
+  ok("borrowed severity is marked as borrowed",
+     /carries no severity of its own/.test(e.limits.join(" ")), e.limits.join(" | "));
+
+  // "acted on" claims action, on a record whose own caveat says it could not
+  // have stopped anything.
+  eq("the action is linked under a label that claims no action", e.next.label, "What it applies to");
+  eq("the action event is offered as a link", e.next.eventId, "ev-1");
+  ok("one action is stated as one", /one recorded action/.test(e.next.text), e.next.text);
+
+  // Monitor mode is the difference between "chose not to act" and "could not".
+  ok("monitor mode says the decision could not have blocked anything",
+     /could not have stopped/.test(e.limits.join(" ")), e.limits.join(" | "));
+  ok("an enforcement denies establishing what happened next",
+     /does not show what the agent did next/.test(e.limits.join(" ")), e.limits.join(" | "));
+
+  // reason "monitor_mode" restates mode "monitor"; do not print it twice.
+  ok("a reason that merely restates the mode is not repeated",
+     (e.limits.join(" ").match(/monitor/g) || []).length <= 2, e.limits.join(" | "));
+
+  // Other decisions.
+  function what(o){ return explain(enf(o), NOIDX).what; }
+  ok("a deny decision is stated as a block", /blocked/.test(what({ decision:"deny" })), what({ decision:"deny" }));
+  ok("an allow decision is stated as allowed", /allowed/.test(what({ decision:"allow" })), what({ decision:"allow" }));
+  ok("an unrecognised decision is quoted rather than guessed at",
+     /“escalate”/.test(what({ decision:"escalate" })), what({ decision:"escalate" }));
+  ok("a decision-less enforcement still explains itself", !!what({}).length);
+
+  // An unresolvable finding must still be named, not silently dropped.
+  var orphan = enf({ decision:"deny", finding_ids:["fnd-missing"], action_event_ids:[] });
+  var oe = explain(orphan, buildIndex([orphan]));
+  eq("an unresolved finding is still listed", oe.findings.length, 1);
+  eq("an unresolved finding is named by its id", oe.findings[0].finding, "fnd-missing");
+  ok("an unresolved finding claims no severity", !oe.findings[0].sev, JSON.stringify(oe.findings[0]));
+  ok("no action events says so rather than inventing one",
+     /names no action event/.test(oe.next.text), oe.next.text);
+
+  // Several actions.
+  var multi = enf({ decision:"deny", action_event_ids:["a1","a2","a3"] });
+  var me = explain(multi, buildIndex([multi]));
+  ok("several actions are counted", /3 recorded actions/.test(me.next.text), me.next.text);
+
+  ok("an enforcement with only record_type still explains itself",
+     !!explain({ record_type:"enforcement" }, NOIDX).what);
+  ok("an all-null enforcement still explains itself",
+     !!explain({ record_type:"enforcement", decision:null, mode:null, reason:null,
+                 rule_ids:null, finding_ids:null, action_event_ids:null }, NOIDX).what);
+  ok("a malformed finding_ids list does not throw",
+     !!explain({ record_type:"enforcement", finding_ids:"nope" }, NOIDX).what);
+})();
+
+/* — defects the cold reviewers found in the new panes — */
+(function(){
+  function enf(o){ o.record_type = "enforcement"; return o; }
+  function ind(o){ o.record_type = "indicator"; return o; }
+
+  // A refused join key is a limit of this viewer, not an absence from the
+  // record. The event path already learned this; the enforcement path had not.
+  var refused = enf({ decision:"deny", finding_ids:["F-EVIL WITH SPACE"],
+                      action_event_ids:["E-ID WITH SPACE"], rule_ids:["r"] });
+  var re = explain(refused, buildIndex([refused]));
+  ok("a refused action id is reported as a viewer limit",
+     /not in a form this viewer will match on/.test(re.next.text), re.next.text);
+  ok("a refused action id does not claim the record named none",
+     !/names no action event/.test(re.next.text), re.next.text);
+  ok("a refused finding id is disclosed rather than silently dropped",
+     /finding id is not in a form this viewer will match on/.test(re.limits.join(" ")),
+     re.limits.join(" | "));
+
+  // A decoy finding sharing an id must not silently choose the severity an
+  // operator triages by.
+  var decoy = { record_type:"finding", finding_id:"F-DUP", rule_id:"benign.rule",
+                title:"nothing to see here", severity:"low" };
+  var real  = { record_type:"finding", finding_id:"F-DUP", rule_id:"exfil.credentials",
+                title:"credential exfiltration", severity:"critical" };
+  var dupEnf = enf({ decision:"no_override", mode:"monitor", finding_ids:["F-DUP"],
+                     action_event_ids:["E1"], rule_ids:["exfil.credentials"] });
+  var de = explain(dupEnf, buildIndex([decoy, real, dupEnf]));
+  ok("a duplicated finding id is flagged as ambiguous",
+     /may belong to a different one/.test(de.limits.join(" ")), de.limits.join(" | "));
+  ok("a unique finding id raises no ambiguity note",
+     !/may belong to a different one/.test(
+       explain(dupEnf, buildIndex([real, dupEnf])).limits.join(" ")));
+
+  // Caps must be stated, not applied silently.
+  var many = []; for(var i=0;i<300;i++) many.push("a"+i);
+  var capped = explain(enf({ decision:"deny", action_event_ids:many, finding_ids:many }),
+                       buildIndex([]));
+  ok("a capped action list states the record's real count",
+     /references 300 recorded actions/.test(capped.next.text), capped.next.text);
+  ok("a capped action list says how many it listed",
+     /lists the first \d+/.test(capped.next.text), capped.next.text);
+  ok("a capped finding list says it is the first N of the record's total",
+     /first \d+ of 300 findings/.test(capped.findingsNote), capped.findingsNote);
+
+  // A decision that says "blocked" under a mode that cannot block is an
+  // internally inconsistent record. Assert neither.
+  var conflict = explain(enf({ decision:"block", mode:"monitor" }), NOIDX);
+  ok("a block under monitor mode is reported as a disagreement",
+     /decision and the mode disagree/.test(conflict.limits.join(" ")), conflict.limits.join(" | "));
+  ok("a block under monitor mode does not also claim it could not have blocked",
+     !/could not have stopped/.test(conflict.limits.join(" ")), conflict.limits.join(" | "));
+
+  // "monitor_mode" and "monitor" are the same mode; matching exactly dropped
+  // the most important caveat on the pane for a spelling variant.
+  ok("a mode spelled monitor_mode still gets the non-blocking caveat",
+     /could not have stopped/.test(explain(enf({ decision:"no_override", mode:"monitor_mode" }), NOIDX).limits.join(" ")));
+  ok("a mode spelled monitor_mode is not rendered as 'monitor_mode mode'",
+     !/monitor_mode mode/.test(explain(enf({ decision:"no_override", mode:"monitor_mode" }), NOIDX).what));
+
+  // rule_ids[0] is not known to belong to the unresolved finding.
+  var mixed = enf({ decision:"deny", finding_ids:["f1","fX"], rule_ids:["r.zzz"] });
+  var mx = explain(mixed, buildIndex([{ record_type:"finding", finding_id:"f1", rule_id:"r.one" }, mixed]));
+  ok("an unresolved finding is not pinned to an arbitrary rule id",
+     !/r\.zzz/.test(mx.limits.join(" ")), mx.limits.join(" | "));
+  ok("the unresolved count is still reported",
+     /not in this file/.test(mx.limits.join(" ")), mx.limits.join(" | "));
+
+  // The indicator quotes the text its value was matched in — and only when the
+  // value is actually in it.
+  var ev1 = { record_type:"event", event_type:"command.exec", event_id:"S1",
+              command:"echo start && ssh -o ConnectTimeout=20 ubuntu@100.100.54.71 'deploy' && echo done" };
+  var i1 = ind({ type:"ipv4", value:"100.100.54.71", count:1, sample_event_id:"S1" });
+  var ie = explain(i1, buildIndex([ev1, i1]));
+  ok("the indicator quotes the command it matched in", !!(ie.seen && ie.seen.text), JSON.stringify(ie.seen));
+  ok("the quote contains the matched value", /100\.100\.54\.71/.test(ie.seen.text), ie.seen.text);
+  ok("the quote is a slice, not the whole command", ie.seen.text.length < 300, ie.seen.text.length);
+  ok("the quote names the event type it came from", ie.seen.from === "command.exec", ie.seen.from);
+
+  var ev2 = { record_type:"event", event_type:"command.exec", event_id:"S2", command:"unrelated text" };
+  var i2 = ind({ type:"ipv4", value:"10.0.0.1", count:1, sample_event_id:"S2" });
+  ok("a value absent from its sample is not quoted from it",
+     explain(i2, buildIndex([ev2, i2])).seen === null);
+
+  // A template is not an address anything resolved.
+  ok("an unexpanded variable marks the value as a template",
+     /template that appeared in the text/.test(
+       explain(ind({ type:"url", value:"https://api.supabase.com/v1/projects/$REF/query", count:1 }), NOIDX).limits.join(" ")));
+  ok("a placeholder marks the value as a template",
+     /template that appeared in the text/.test(
+       explain(ind({ type:"url", value:"https://github.com/YOURNAME/x", count:1 }), NOIDX).limits.join(" ")));
+  ok("a resolved value gets no template caveat",
+     !/template/.test(explain(ind({ type:"domain", value:"api.supabase.com", count:1 }), NOIDX).limits.join(" ")));
+
+  // The email counter-example must not be the record's own value.
+  var self = explain(ind({ type:"email", value:"git@github.com", count:1 }), NOIDX).limits.join(" ");
+  ok("the email caveat does not cite the record's own value as the counter-example",
+     /this one is an SSH remote/.test(self), self);
+
+  // count validation
+  eq("a fractional count is not rendered as occurrences",
+     /occurrences/.test(explain(ind({ type:"url", value:"x", count:2.5, sample_event_id:"S1" }),
+                                buildIndex([ev1])).next.text), false);
+  ok("a zero count is not reported as unknown",
+     /counts no occurrences/.test(explain(ind({ type:"url", value:"x", count:0, sample_event_id:"S1" }),
+                                          buildIndex([ev1])).next.text));
+})();
+
+/* — render-layer defects the cold reviewers found — */
+(function(){
+  ok("the session return is gated on the record being in that session",
+     /r\.sid !== loneSid/.test(HTML),
+     "an indicator carries no session_id and must not be offered a rollup that excludes it");
+  // A 64 MB indicator value cost ~3.9 s per selection and re-ran on every
+  // arrow-key press past the record. Asserting the constant merely EXISTS
+  // would pass with the bound set to 1e12.
+  (function(){
+    var m = HTML.match(/OBSCAP\s*=\s*(\d+)/);
+    ok("the observed block declares a cap", m !== null);
+    ok("the observed cap is small enough to bound a render",
+       m && Number(m[1]) > 0 && Number(m[1]) <= 200000, m && m[1]);
+    ok("the observed cap is actually applied to the escaped value",
+       /esc\(cut\?cmd\.slice\(0,OBSCAP\)/.test(HTML));
+    ok("the truncation is disclosed", /more characters, in the full record below/.test(HTML));
+  })();
+  ok("an indicator's value is not labelled 'observed'",
+     /extracted value/.test(HTML));
+  ok("an unresolvable pair link renders as a disabled button, not silence",
+     /pt<0\?' disabled title="Not in this file/.test(HTML));
+  ok("the endpoint hostname is surfaced in the header",
+     /o\.endpoint\.hostname/.test(HTML));
+  ok("the indicator chip no longer uses the app's positive colour",
+     !/r\.rt==="indicator"\?"ok"/.test(HTML));
+})();
+
+/* — the finding index the new panes need — */
+(function(){
+  var f = { record_type:"finding", finding_id:"f1", rule_id:"r.one",
+            severity:"high", title:"T", cited_event_ids:["e1"] };
+  var idx = buildIndex([f]);
+  ok("buildIndex exposes findings by id", !!(idx.byFinding && idx.byFinding.f1), Object.keys(idx));
+  ok("the finding index is null-prototype",
+     Object.getPrototypeOf(idx.byFinding) === null);
+
+  // Same key discipline as everywhere else: record-derived and untrusted.
+  var poison = { record_type:"finding", finding_id:"__proto__", rule_id:"r" };
+  buildIndex([poison]);
+  ok("a __proto__ finding id does not pollute", Object.prototype.polluted === undefined &&
+     ({}).rule === undefined);
+  var huge = { record_type:"finding", finding_id:new Array(5000).join("k"), rule_id:"r" };
+  eq("an over-long finding id is not indexed",
+     Object.keys(buildIndex([huge]).byFinding).length, 0);
+
+  /* buildIndex's own maps are null-prototype, so a hasOwnProperty guard on the
+     lookup is belt-and-braces there. The guard earns its place against an index
+     the caller supplied: a plain object inherits "constructor", "toString" and
+     the rest, and a lookup that trusts them would attach an inherited Function
+     to a record as though it were a finding. */
+  var enfProto = { record_type:"enforcement", decision:"deny",
+                   finding_ids:["constructor","toString","__proto__"], action_event_ids:[] };
+  [ { byFinding:{} }, { byFinding:Object.prototype }, { byFinding:[] },
+    { byFinding:"nope" }, {} ].forEach(function(hostile, i){
+    var out = explain(enfProto, hostile);
+    ok("a hostile index #" + i + " yields no inherited finding data",
+       out.findings.every(function(f){
+         return typeof f.rule === "string" && typeof f.title === "string" &&
+                typeof f.sev === "string" && !f.rule && !f.title && !f.sev;
+       }), JSON.stringify(out.findings));
+    ok("a hostile index #" + i + " still explains the record", !!out.what.length);
+    // The observable difference an unguarded lookup makes: an inherited
+    // Function is truthy, so the record would be reported as RESOLVED and the
+    // "not in this file" caveat would silently disappear.
+    ok("a hostile index #" + i + " still reports the finding as unresolved",
+       /not in this file/.test(out.limits.join(" ")), out.limits.join(" | "));
+  });
 })();
 
 /* — the explain block must stay self-contained — */
