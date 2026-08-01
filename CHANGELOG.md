@@ -4,6 +4,115 @@ Releases 0.2.0 through 0.5.0 were tagged retroactively, after the fact, at the
 commit where each version's notes below were completed. Only `v0.1.0` was
 tagged at the time.
 
+## 0.7.1
+
+One defect, named in 0.7.0's summary and left unresolved because the obvious fix
+re-created the one 0.6.0 had just fixed.
+
+- **The `tool.result` headline was bounded on both sides.** Remove its trailing
+  sentence and the headline reads *"The Edit tool returned."* — byte-identical
+  to the row summary directly above it on all 1,366 of these records, which is
+  the duplication 0.6.0 added the sentence to fix. Keep it and *"it does not
+  carry what was returned"* fires on 100% of them, which is the constant 0.6.0
+  removed the `confidence` bullet for. Both objections were correct; the fix had
+  to satisfy both.
+
+  The way out was a fact neither function had reached for. A `tool.result`
+  carries no payload field — not `content_preview`, not `command`, not
+  `file_path`, on any of the 1,366 — but the record it answers does: 1,274 of
+  them pair with a `file.read` or `file.write` naming a path. `describe()` is
+  pure over a single record and structurally cannot know it. `explain()` has the
+  index and can. So the headline now names the target of the call it answers —
+  *"The Read call on /a/b.js returned."* — which restates nothing and varies per
+  record. Where the pair is a `tool.call` and carries no path, the headline says
+  what it answered instead, which is also index-derived.
+
+  Measured over the corpus: headlines identical to the row summary went from
+  1,366 to **0**, distinct headlines from 10 to **1,107**, average explanation
+  length from 439 to 320 characters, and there is now **no sentence at all**
+  present on every `tool.result` explanation.
+
+- **The missing payload moved to where the payload would have been.** It is a
+  fact about the event type, not about the record, and `CLAUDE.md` forbids
+  spending per-record prose on one. It now renders as a muted line under its own
+  `output` label — the slot an operator looks in for content — rather than as a
+  sentence in the closed condition set, which is the section that has to stay
+  high-signal. Same treatment for `message.assistant`, which likewise never
+  carries its text. Gated on an explicit set, so a record that does carry a
+  payload can never be described as lacking one.
+
+- The pairing section no longer repeats the target, now that the headline names
+  it.
+
+Four cold reviewers then read the finished state, and between them changed the
+headline again.
+
+- **A guessed pair was stated with confidence in the line the eye lands on.**
+  The headline read `.rec.file_path` off `exPairOf()` while ignoring the
+  `ambiguous` and `truncated` flags the section directly below it hedges on — so
+  a pane could assert *"The Read call on /x.js returned."* above *"which one
+  this answers cannot be determined from this file."* Concatenate this corpus
+  with itself, which is what two overlapping exports look like, and **all 2,732**
+  results do exactly that. `exPairOf`'s own comment says the flags exist so a
+  caller can decline to guess; the headline is now a caller that declines.
+
+- **The mate did not have to be a call.** `exPairOf` falls back to the first
+  other record when no call-side type is present, so a `tool.result` sharing a
+  key with another `tool.result` reported *"answering a tool.result"*, and a
+  `session.start` carrying a path could supply the target. Gated on the mate
+  actually being a call side. The tool name now comes from the mate too — it
+  describes the call, not the result.
+
+- **Tail truncation destroyed the filename.** A 200-character path was inlined
+  raw: 1,101 of 1,366 headlines ran past 120 characters and 104 were cut
+  mid-word, keeping ~120 characters of worktree prefix and losing
+  `viewer-write.tes…`. And `tool.result` is the one pane with no `observed`
+  block and no `file_path` in its own JSON, so that was the only appearance of
+  the target anywhere. Headlines now elide the middle and keep the filename, the
+  same way `describe()` always has — asserted equal to it by test — and
+  `file.read`/`file.write` headlines were doing the same thing and now elide too.
+
+- **The pane never said whether the call worked, and "returned" invites the
+  reading that it did.** The sibling `tool.call` pane says *"It carries no exit
+  code, so whether the call succeeded is not recorded here"*; the result side
+  said nothing. The `output` line now denies content *and* outcome, in the slot
+  rather than as a bullet.
+
+- **Elapsed time.** Both timestamps are in the file, and subtracting them is an
+  observation rather than a reported duration — 0 of 1,108 pairs run backwards.
+  It is also the one number here that moves: 115 ms to 27 minutes, with five
+  runs over five minutes. A 17-minute subagent looked exactly like a 115 ms file
+  read. It also gives the 92 results answering a pathless `tool.call` something
+  to say, so the headline stopped restating the section below it. Rendered only
+  when the pair is trustworthy and the delta is not negative.
+
+- **The subagent caveat had lost its antecedent** on 869 of 1,366 panes — it
+  referred to a subagent the headline no longer named and nothing else on the
+  pane introduced. It names it now, and checks the rendered headline rather than
+  a list of event types so it cannot drift.
+
+- **The no-payload line was tool.result copy applied to `message.assistant`.**
+  All 57 of those panes read *"numbat records that the call returned, not what
+  it returned"* under a headline saying the agent sent a message. There was no
+  call and nothing returned. Each type has its own label and wording now, and
+  the table moved out of `showDetail` so it is not rebuilt on every arrow-key
+  press. It also stopped rendering inside the `.cmd` box, which is reserved for
+  text that came out of the file — an absence written by the viewer should not
+  wear the chrome of record content.
+
+- `describe()` said *"Agent replied"*, asserting a reply relationship no field
+  on the record carries. It says *"sent a message"*, matching the pane.
+
+- A test of mine was decoration and a mutation caught it: *"no sentence is
+  present on every tool.result explanation"* compared whole sections, so the
+  constant hid inside a string that varied for another reason — the old headline
+  appended the same clause to a varying tool name. It splits to sentences now.
+  Two more asserted the new `output` block merely *existed*, which passed with
+  the branch replaced by `false` and with the gate widened to every event type;
+  they assert the gate. Two more escaped the second round — nothing covered a
+  result stamped before its call, or the `file.*` headlines' own path elision —
+  and both are covered now. Nine mutations, all caught.
+
 ## 0.7.0
 
 Every record type now has an interpretation pane, the conventions the code

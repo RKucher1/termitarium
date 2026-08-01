@@ -1647,8 +1647,9 @@ var NOIDX = buildIndex([]);
      "The agent called the Agent tool.");
   eq("tool.call without a tool name stays general",
      what({ event_type:"tool.call" }), "The agent called a tool.");
-  eq("tool.result names the tool", what({ event_type:"tool.result", tool_name:"Edit" }),
-     "The Edit tool returned. This record marks the return; it does not carry what was returned.");
+  // tool.result's headline needs an index — the only things it can say that
+  // the row summary cannot come from the record it answers — so it is
+  // exercised in its own block below rather than through what().
 
   eq("session.start names the model when it has one",
      what({ event_type:"session.start", model:"claude-opus-5" }),
@@ -2237,6 +2238,233 @@ var NOIDX = buildIndex([]);
                  rule_ids:null, finding_ids:null, action_event_ids:null }, NOIDX).what);
   ok("a malformed finding_ids list does not throw",
      !!explain({ record_type:"enforcement", finding_ids:"nope" }, NOIDX).what);
+})();
+
+/* — tool.result: no constant sentence, and no restatement of the row ────────
+   Two failure modes bound this, and 0.6.0 and 0.7.0 each hit one of them.
+
+   Remove the trailing sentence and the headline becomes "The Edit tool
+   returned." — byte-identical to describe()'s row summary on every one of the
+   1,366 tool.result records in the reference corpus, which is what 0.6.0 was
+   fixing when it added the sentence.
+
+   Keep the sentence and it fires on 100% of them, because a tool.result
+   carries no payload field ever — not content_preview, not command, not
+   file_path, on any of the 1,366. That makes it a fact about the event TYPE,
+   not about the record, and CLAUDE.md forbids spending per-record space on one.
+
+   The way out is that a tool.result's counterpart carries a target it does
+   not: 1,274 of 1,366 pair with a file.read/file.write naming a path. That is
+   information describe() cannot have — it is pure over a single record — so
+   the headline can carry it without restating anything. The absence of a
+   payload moves to the slot where the payload would have been.               */
+(function(){
+  function pairFor(callType, tool, path, tsA, tsB){
+    var call = exEv({ event_type:callType, event_id:"c1", tool_call_id:"tt",
+                      tool_name:tool, file_path:path, timestamp:tsA });
+    var res  = exEv({ event_type:"tool.result", event_id:"c2", tool_call_id:"tt",
+                      tool_name:tool, timestamp:tsB });
+    return { call:call, res:res, idx:buildIndex([call, res]) };
+  }
+  var T0 = "2026-07-31T18:00:00.000Z", T1 = "2026-07-31T18:00:00.128Z";
+
+  var P = pairFor("file.write", "Edit", "/a/b.js", T0, T1);
+  var e = explain(P.res, P.idx);
+  eq("the headline names the target and how long the call was outstanding",
+     e.what, "The Edit tool returned, called on /a/b.js. The call was recorded 128 ms earlier.");
+
+  // The invariant, asserted directly rather than by matching a string.
+  ok("the headline is not the row summary reworded",
+     e.what.replace(/[.\s]/g,"") !== describe(P.res).replace(/[.\s]/g,""),
+     describe(P.res) + "  vs  " + e.what);
+  var all = [e.what].concat(e.next?[e.next.text]:[]).concat(e.limits).join(" ");
+  ok("no sentence claims what the record does not carry",
+     !/does not carry what was returned/.test(all), all);
+  ok("the pairing section no longer repeats the target",
+     !/It targeted/.test(e.next.text), e.next.text);
+
+  /* Long paths elide the MIDDLE, keeping the filename. Tail truncation kept
+     120 characters of worktree prefix and destroyed the identifying segment —
+     and tool.result is the one pane with no OBSERVED fallback and no file_path
+     in its own JSON, so a lost filename was unrecoverable. */
+  (function(){
+    var deep = "/Users/x/.superset/worktrees/8635b301-bd9e-4456-aa67-78f676170d23/" +
+               "admin-pages-bug-audit/sh-dashboard/src/app/api/v1/portal/contacts/" +
+               "__tests__/viewer-write.test.js";
+    var L = pairFor("file.write", "Write", deep, T0, T1);
+    var lw = explain(L.res, L.idx).what;
+    ok("a long target keeps its filename", /viewer-write\.test\.js/.test(lw), lw);
+    ok("a long target drops the prefix instead", /…\//.test(lw), lw);
+    ok("the headline stays a readable length", lw.length < 130, lw.length + ": " + lw);
+    // the same elision describe() uses, so the row and the pane agree
+    ok("path elision matches describe()'s",
+       /…\/__tests__\/viewer-write\.test\.js/.test(lw) &&
+       /…\/__tests__\/viewer-write\.test\.js/.test(describe(L.call)), lw);
+  })();
+
+  // 92 of 1,366 answer a pathless tool.call. Elapsed time gives them something
+  // to say instead of restating the section directly below them.
+  var Q = pairFor("tool.call", "Agent", null, T0, "2026-07-31T18:17:14.000Z");
+  var qe = explain(Q.res, Q.idx);
+  eq("a targetless result reports how long its call was outstanding",
+     qe.what, "The Agent tool returned. The call was recorded 17 min 14 s earlier.");
+  ok("a targetless result does not restate the section below it",
+     !/answering a tool\.call/.test(qe.what), qe.what);
+  ok("a targetless result is still not the row summary reworded",
+     qe.what.replace(/[.\s]/g,"") !== describe(Q.res).replace(/[.\s]/g,""),
+     describe(Q.res) + "  vs  " + qe.what);
+
+  /* A guessed pair must not be stated with confidence in the line the eye lands
+     on. Concatenating the reference corpus with itself — two overlapping
+     exports — makes every one of its tool_call_id groups ambiguous. */
+  (function(){
+    var c1 = exEv({ event_type:"file.read", event_id:"x1", tool_call_id:"tz",
+                    tool_name:"Read", file_path:"/real/one.js", timestamp:T0 });
+    var c2 = exEv({ event_type:"file.read", event_id:"x2", tool_call_id:"tz",
+                    tool_name:"Read", file_path:"/decoy/two.js", timestamp:T0 });
+    var rr = exEv({ event_type:"tool.result", event_id:"x3", tool_call_id:"tz",
+                    tool_name:"Read", timestamp:T1 });
+    var a = explain(rr, buildIndex([c1, c2, rr]));
+    ok("an ambiguous pair is not given a confident target",
+       !/one\.js|two\.js/.test(a.what), a.what);
+    ok("an ambiguous pair says so in the headline",
+       /cannot be determined from this file/.test(a.what), a.what);
+    ok("the headline and the pairing section agree about the ambiguity",
+       /cannot be determined/.test(a.what) && /cannot be determined/.test(a.next.text),
+       a.what + " || " + a.next.text);
+    ok("an ambiguous pair claims no elapsed time either",
+       !/earlier/.test(a.what), a.what);
+  })();
+
+  // exPairOf falls back to the first other record when no call-side type is
+  // present. A tool.result does not answer a tool.result.
+  (function(){
+    var other = exEv({ event_type:"tool.result", event_id:"y1", tool_call_id:"ty",
+                       tool_name:"Read", file_path:"/decoy/path.js" });
+    var self  = exEv({ event_type:"tool.result", event_id:"y2", tool_call_id:"ty", tool_name:"Read" });
+    var ne = explain(self, buildIndex([other, self]));
+    ok("a non-call mate never supplies the target",
+       !/decoy/.test(ne.what), ne.what);
+    var ms = exEv({ event_type:"message.assistant", event_id:"y3", tool_call_id:"tw" });
+    var r2 = exEv({ event_type:"tool.result", event_id:"y4", tool_call_id:"tw", tool_name:"Read" });
+    ok("a message.assistant mate is not described as the call it answers",
+       !/message\.assistant/.test(explain(r2, buildIndex([ms, r2])).what),
+       explain(r2, buildIndex([ms, r2])).what);
+  })();
+
+  // The tool name belongs to the call, so it comes from the mate.
+  (function(){
+    var c = exEv({ event_type:"file.read", event_id:"m1", tool_call_id:"tm",
+                   tool_name:"Read", file_path:"/etc/hosts", timestamp:T0 });
+    var r = exEv({ event_type:"tool.result", event_id:"m2", tool_call_id:"tm",
+                   tool_name:"Bash", timestamp:T1 });
+    var me = explain(r, buildIndex([c, r])).what;
+    ok("the headline describes the call with the call's own tool name",
+       /The Read tool/.test(me) && !/Bash/.test(me), me);
+  })();
+
+  eq("a result with no pair at all still names the tool",
+     explain(exEv({ event_type:"tool.result", event_id:"n1", tool_name:"Edit" }), NOIDX).what,
+     "The Edit tool returned.");
+  /* A result stamped BEFORE its call is a corrupt or clock-skewed file. The
+     elapsed time is a subtraction of two record timestamps, so it must not be
+     rendered negative — and it must not be rendered at all, because the
+     ordering it implies is not what the records show. */
+  (function(){
+    var B = pairFor("file.read", "Read", "/a/b.js", "2026-07-31T18:00:05.000Z",
+                                                   "2026-07-31T18:00:00.000Z");
+    var bw = explain(B.res, B.idx).what;
+    ok("a backwards pair claims no elapsed time", !/earlier/.test(bw), bw);
+    ok("a backwards pair never renders a negative duration", !/-\d/.test(bw), bw);
+    ok("a backwards pair still names the target", /\/a\/b\.js/.test(bw), bw);
+  })();
+
+  ok("a result whose timestamps do not parse claims no elapsed time",
+     !/earlier/.test(explain(pairFor("file.read","Read","/a",  "nope","alsonope").res,
+                             pairFor("file.read","Read","/a","nope","alsonope").idx).what));
+
+  /* The regression guard: across a spread of shapes, no SENTENCE may appear in
+     every explanation. Comparing whole sections let the old constant hide
+     inside a string that varied for another reason. */
+  (function(){
+    var shapes = [
+      pairFor("file.write", "Edit",  "/a/b.js", T0, T1),
+      pairFor("file.read",  "Read",  "/c/d.md", T0, T1),
+      pairFor("file.write", "Write", "/e/f.txt", T0, T1),
+      pairFor("tool.call",  "Agent", null, T0, T1),
+      pairFor("tool.call",  "Skill", null, T0, T1)
+    ];
+    var lone = exEv({ event_type:"tool.result", event_id:"z", tool_call_id:"zz", tool_name:"Read" });
+    var sets = shapes.map(function(x){
+      var r = explain(x.res, x.idx);
+      return [r.what].concat(r.next?[r.next.text]:[]).concat(r.limits);
+    });
+    sets.push((function(){ var r = explain(lone, buildIndex([lone]));
+      return [r.what].concat(r.next?[r.next.text]:[]).concat(r.limits); })());
+
+    function sentences(arr){
+      var out = [];
+      arr.forEach(function(sec){
+        String(sec).split(/(?<=[.;])\s+/).forEach(function(t){ t=t.trim(); if(t) out.push(t); });
+      });
+      return out;
+    }
+    var sentSets = sets.map(sentences);
+    var everywhere = sentSets[0].filter(function(sent){
+      return sentSets.every(function(set){ return set.indexOf(sent) !== -1; });
+    });
+    ok("no sentence is present on every tool.result explanation",
+       everywhere.length === 0, JSON.stringify(everywhere));
+    var heads = sets.map(function(s2){ return s2[0]; });
+    ok("tool.result headlines vary across shapes",
+       new Set(heads).size === heads.length, JSON.stringify(heads));
+  })();
+
+  /* The absence lives in the render layer, so these check the gate and the
+     wording, not merely that the words exist somewhere. */
+  (function(){
+    ok("the payload slot is a plain line, not the record-content box",
+       /NOPAYLOAD\[r\.etype\][\s\S]{0,200}?class="ruline"/.test(HTML) ||
+       /np\.txt/.test(HTML) && !/np\.txt[\s\S]{0,80}class="cmd/.test(HTML));
+    ok("the placeholder is reachable — gated on the absence, not dead code",
+       /!cmd && r\.rt === "event" &&\s*Object\.prototype\.hasOwnProperty\.call\(NOPAYLOAD, r\.etype\)/.test(HTML));
+    var m = HTML.match(/var NOPAYLOAD = \{([\s\S]*?)\n  \};/);
+    ok("the no-payload table is declared once, outside showDetail", m !== null);
+    var keys = (m ? m[1].match(/"([a-z.]+)":\s*\{/g) || [] : [])
+                 .map(function(k){ return k.replace(/"|:\s*\{/g,""); }).sort();
+    eq("only types that genuinely carry no payload are listed",
+       keys.join(","), "message.assistant,tool.result");
+    /* Each type gets its own wording. One shared string described a call that
+       returned — false of every message.assistant, which answers no call. */
+    ok("the two types do not share a sentence",
+       m && m[1].indexOf("the agent sent a message") !== -1 &&
+            m[1].indexOf("a call completed") !== -1, m && m[1]);
+    ok("the message wording says nothing about a call returning",
+       m && !/not what it returned/.test(m[1].split("message text")[1] || ""), m && m[1]);
+    // "returned" invites the reading that the call worked; this is the slot
+    // that can deny it, and tool.result's own limits say nothing about outcome.
+    ok("the output wording denies the outcome too", /not its content or its outcome/.test(HTML));
+  })();
+})();
+
+/* — every headline that inlines a path elides it the same way — */
+(function(){
+  var deep = "/Users/x/.superset/worktrees/8635b301-bd9e-4456-aa67-78f676170d23/" +
+             "admin-pages-bug-audit/sh-dashboard/src/app/api/v1/portal/contacts/" +
+             "__tests__/viewer-write.test.js";
+  [["file.read","read"],["file.write","write"]].forEach(function(t){
+    var w = explain(exEv({ event_type:t[0], event_id:"p1", tool_call_id:"pp",
+                           tool_name:"Read", file_path:deep }), NOIDX).what;
+    ok(t[0]+" elides the middle of a long path", /…\//.test(w), w);
+    ok(t[0]+" keeps the filename", /viewer-write\.test\.js/.test(w), w);
+    ok(t[0]+" headline stays readable", w.length < 130, w.length+": "+w);
+  });
+  // and it is the same elision describe() applies, so row and pane agree
+  var d = describe(exEv({ event_type:"file.read", file_path:deep }));
+  var x = explain(exEv({ event_type:"file.read", event_id:"q1", file_path:deep }), NOIDX).what;
+  var seg = /…\/__tests__\/viewer-write\.test\.js/;
+  ok("describe() and explain() elide a path identically",
+     seg.test(d) && seg.test(x), d + " || " + x);
 })();
 
 /* — defects the cold reviewers found in the new panes — */

@@ -871,8 +871,10 @@
       return pv ? "Operator sent a prompt: " + pv : "Operator sent a prompt";
     }
     if(et === "message.assistant"){
+      // "replied" asserts a reply relationship no field on the record carries,
+      // and the pane one line below says "sent a message".
       var mv = dsTrunc(o.content_preview, 110);
-      return mv ? "Agent replied: " + mv : "Agent replied";
+      return mv ? "Agent sent a message: " + mv : "Agent sent a message";
     }
     if(et === "tool.call")   return tool ? "Called the " + tool + " tool" : "Called a tool";
     if(et === "tool.result") return tool ? "The " + tool + " tool returned" : "A tool returned";
@@ -1141,6 +1143,26 @@
     var c = t.charCodeAt(cut - 1);
     if(c >= 0xD800 && c <= 0xDBFF) cut--;
     return t.slice(0, cut) + "…";
+  }
+  /* Middle-eliding path shortener. Duplicated from describe()'s dsPath by the
+     marker rule — a test asserts the two agree on every input. Headlines were
+     inlining raw 200-character absolute paths mid-sentence: 1,101 of 1,366
+     tool.result headlines ran past 120 characters, the longest to 228. */
+  function exPath(v){
+    var p = exTrunc(v, 400);
+    if(!p || p.length <= 58) return p;
+    var parts = p.split("/");
+    if(parts.length > 2){
+      var tail = "…/" + parts.slice(-2).join("/");
+      if(tail.length < p.length) return exTrunc(tail, 58);
+    }
+    return exTrunc(p, 58);
+  }
+  function exMs(v){
+    var t = exClean(v);
+    if(!t) return 0;
+    var n = Date.parse(t);
+    return isNaN(n) ? 0 : n;
   }
   function exNum(v){ return (typeof v === "number" && isFinite(v)) ? v : null; }
   function exInt(v){
@@ -1609,23 +1631,58 @@
         what = "numbat recorded a result for a shell command" +
                (dur !== null ? ", reporting a duration of " + exDur(dur) : "") + ".";
       } else if(et === "file.read"){
-        what = path ? who + " asked to read " + path + (tool ? " using " + tool : "") + "."
+        what = path ? who + " asked to read " + exPath(path) + (tool ? " using " + tool : "") + "."
                     : who + " asked to read a file.";
       } else if(et === "file.write"){
-        what = path ? who + " asked to write " + path + (tool ? " using " + tool : "") + "."
+        what = path ? who + " asked to write " + exPath(path) + (tool ? " using " + tool : "") + "."
                     : who + " asked to write a file.";
       } else if(et === "file.delete"){
-        what = path ? who + " asked to delete " + path + (tool ? " using " + tool : "") + "."
+        what = path ? who + " asked to delete " + exPath(path) + (tool ? " using " + tool : "") + "."
                     : who + " asked to delete a file.";
       } else if(et === "tool.call"){
         what = tool ? who + " called the " + tool + " tool." : who + " called a tool.";
       } else if(et === "tool.result"){
-        what = (tool ? "The " + tool + " tool returned." : "A tool returned.");
-        // Verbatim-identical to the row summary otherwise, on every one of the
-        // 1,268 tool.result records in the reference corpus. What it can add is
-        // the absence an operator would otherwise go looking for in the JSON.
-        if(!exClean(o.content_preview) && !exClean(o.command) && !exClean(o.file_path))
-          what += " This record marks the return; it does not carry what was returned.";
+        /* Bounded on both sides. Drop the trailing sentence and this is
+           byte-identical to the row summary on all 1,366 of these; keep it and
+           it fires on 100% of them, because a tool.result carries no payload
+           field ever — a fact about the event type, not the record.
+
+           The counterpart carries a target this record does not: 1,274 answer a
+           file.read or file.write naming a path. describe() is pure over one
+           record and cannot know it, so naming it restates nothing.
+
+           Everything below is gated on the pair being TRUSTWORTHY. exPairOf
+           falls back to the first other record when no call-side type is
+           present, and its ambiguous/truncated flags exist so a caller can
+           decline to guess — the section below already hedges on them, and a
+           confident headline over a hedged section is worse than a plain one.
+           Concatenate this corpus with itself and every one of the 2,732
+           results has an indeterminate pair. */
+        var rPair  = exPairOf(o, index, "", true);
+        var rMate  = rPair ? rPair.rec : null;
+        var rMType = rMate ? exClean(rMate.event_type) : "";
+        var rIsCall = !!(rMate && exHas(EX_CALL, rMType));
+        var rSure  = !!(rIsCall && rPair && !rPair.ambiguous && !rPair.truncated);
+        var rTool  = (rSure ? exTrunc(rMate.tool_name, 40) : "") || tool;
+        var rHead  = rTool ? "The " + rTool + " tool returned" : "A tool returned";
+        var rPath  = rSure ? exPath(rMate.file_path) : "";
+        if(rPath)      what = rHead + ", called on " + rPath + ".";
+        else if(rMate && !rSure)
+                       what = rHead + ". Which call it answers cannot be determined from this file.";
+        else           what = rHead + ".";
+
+        /* How long the call was outstanding — the difference between two
+           timestamps in this file, so it is an observation rather than a
+           reported duration. It is the one number here that moves: 115 ms to
+           27 minutes across the corpus, and a 17-minute subagent looks exactly
+           like a 115 ms file read without it. It also gives the 92 results that
+           answer a pathless tool.call something to say, so the headline no
+           longer has to restate what the section below it exists to say. */
+        if(rSure){
+          var rA = exMs(rMate.timestamp), rB = exMs(o.timestamp);
+          if(rA && rB && rB >= rA)
+            what += " The call was recorded " + exDur(rB - rA) + " earlier.";
+        }
       } else if(et === "session.start" || et === "session.end"){
         var edge = (et === "session.start") ? "start" : "end";
         if(sub)
@@ -1704,7 +1761,9 @@
               txt = "This is the result of a matching " + mateType + where +
                     ", where the " + noun2 + " was " +
                     (noun2 === "command" ? "proposed" : "requested") + ".";
-              var mp2 = exTrunc(mate.file_path, 200);
+              // The target is named in the headline for tool.result; repeating
+              // it here would put the same path on screen twice.
+              var mp2 = (et === "tool.result") ? "" : exTrunc(mate.file_path, 200);
               if(mp2) txt += " It targeted " + mp2 + ".";
               if(pair.ambiguous)
                 txt += " Several records share this tool_call_id, so which one this answers cannot be determined from this file.";
@@ -1801,8 +1860,16 @@
 
       // The headline already names the subagent; this only has to say where
       // numbat files its records, and it used to take 174 characters to do it.
-      if(sub)
-        limits.push("numbat files subagent work under the parent's session_id, so this belongs to the session above rather than one of its own.");
+      /* 869 of 1,366 tool.result records carry a sub_agent, and their headline
+         does not name it — so this line referred to a subagent nothing on the
+         pane had introduced. Checked against the rendered headline rather than
+         a list of event types, so it cannot drift. */
+      if(sub){
+        var namedSub = !!(subName && what.indexOf(subName) !== -1);
+        limits.push((namedSub ? "" : "This record was produced by " +
+                      (subName ? "the " + subName + " subagent" : "a subagent") + ". ") +
+                    "numbat files subagent work under the parent's session_id, so this belongs to the session above rather than one of its own.");
+      }
 
       if(et === "permission.requested"){
         // "asked" is the marker that a decision was requested, not a decision.
@@ -2641,6 +2708,15 @@
      record establishes is that a root session.end exists. The state is named
      after the record, and only the genuinely incomplete states take a colour. */
   // One phrasing for a decision token, shared by the rollup and the row list.
+  /* What a record of this type produces but never carries. Gated per type so a
+     record that does carry a payload can never be described as lacking one. */
+  var NOPAYLOAD = {
+    "tool.result":       { lbl:"output",
+      txt:"not captured — numbat records that a call completed, not its content or its outcome." },
+    "message.assistant": { lbl:"message text",
+      txt:"not captured — numbat records that the agent sent a message, not what it said." }
+  };
+
   var DECISION = {
     no_override: "did not intervene", monitor: "did not intervene", observe: "did not intervene",
     deny: "blocked", block: "blocked", blocked: "blocked",
@@ -2990,6 +3066,20 @@
     if(r.rt==="finding") h+=ipRender(interpret(o,RULECAT));
     else h+=exRender(explain(o,eventIndex()));   // event, indicator, enforcement
     var cmd=s(o.command)||s(o.observed_command)||s(o.content_preview)||s(o.url)||s(o.value)||s(o.file_path)||s(o.observed_file_path)||s(o.message);
+    /* Event types that produce something the record then does not carry. The
+       absence belongs in the slot the content would have filled — not as a
+       sentence in the closed condition set, where the same words on every
+       record of a type train the eye past the caveat that matters.
+
+       Per type, because the wording is not shared: a message.assistant answers
+       no call and returns nothing, and was being told it did. It also says
+       "outcome", because "returned" invites the reading that the call worked
+       and this is the slot that can deny it. Rendered as a plain line rather
+       than in the .cmd box, which is reserved for text that came out of the
+       file. */
+    var np = (!cmd && r.rt === "event" &&
+              Object.prototype.hasOwnProperty.call(NOPAYLOAD, r.etype)) ? NOPAYLOAD[r.etype] : null;
+    if(np) h+='<span class="lbl">'+esc(np.lbl)+'</span><div class="ruline">'+esc(np.txt)+'</div>';
     if(cmd){
       // Bounded like every other record-derived render path: this is fed
       // straight from record content and had no cap at all.

@@ -193,6 +193,33 @@ in the same breath that this shows neither failure nor execution. In the
 reference corpus 13 of 1,973 proposed commands have no result, and 12 of those
 13 are mid-session, so a missing result is not a truncated file.
 
+The pairing also runs the other way, and it is what makes a `tool.result`
+readable at all. Those records carry no payload of any kind — no output, no
+path, no preview — so on their own the most a summary can say is *"The Edit tool
+returned"*, which is the same sentence for all 1,366 of them. But the record
+they answer names a target: 1,274 pair with a `file.read` or `file.write`
+carrying a path. The pane names it — *"The Read call on /a/b.js returned."* —
+which is something no per-record summary can know, because it is in a different
+record.
+
+It also reports how long the call was outstanding, by subtracting the two
+timestamps — an observation, not a reported duration. That is the number here
+that actually moves: 115 ms to 27 minutes across the corpus, and without it a
+seventeen-minute subagent looks exactly like a 115 ms file read.
+
+Everything the headline borrows from the counterpart is gated on the pairing
+being trustworthy. Where several records share a `tool_call_id`, where the group
+is larger than the index holds, or where the counterpart is not a call at all,
+the pane says the pairing cannot be determined rather than naming a target it
+guessed — the same hedge the section below it has always carried.
+
+What the result did not carry is stated where the payload would have been, under
+an `output` label, rather than as a sentence in the explanation. It is a fact
+about the event type rather than about the record, and the same words on every
+pane of a type teach the eye to skip the section that has to stay worth reading.
+It denies the outcome as well as the content, because *returned* invites the
+reading that the call worked and nothing else on that pane refuses it.
+
 **Findings that cite it.** `cited_event_ids` only runs finding→event in the
 file. The viewer builds the reverse index, so an event can say *this action
 triggered a finding*, name the rule, and link to it — the mirror of the jump
