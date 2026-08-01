@@ -2352,15 +2352,121 @@ var NOIDX = buildIndex([]);
        explain(r2, buildIndex([ms, r2])).what);
   })();
 
-  // The tool name belongs to the call, so it comes from the mate.
+  /* The tool name is the call's, so it comes from the mate — but then a single
+     planted record could hand a result an attacker-chosen tool and path, and
+     the row above ("The Bash tool returned") would disagree with the headline
+     silently. When they disagree the pane describes a call no record describes,
+     so it declines. 0 of 1,366 real pairs disagree. */
   (function(){
     var c = exEv({ event_type:"file.read", event_id:"m1", tool_call_id:"tm",
                    tool_name:"Read", file_path:"/etc/hosts", timestamp:T0 });
     var r = exEv({ event_type:"tool.result", event_id:"m2", tool_call_id:"tm",
                    tool_name:"Bash", timestamp:T1 });
     var me = explain(r, buildIndex([c, r])).what;
-    ok("the headline describes the call with the call's own tool name",
-       /The Read tool/.test(me) && !/Bash/.test(me), me);
+    ok("a tool-name disagreement is not resolved silently",
+       !/\/etc\/hosts/.test(me), me);
+    ok("a tool-name disagreement keeps the record's own tool",
+       /The Bash tool/.test(me), me);
+    ok("a tool-name disagreement says the pairing is undetermined",
+       /cannot be determined/.test(me), me);
+    // agreement is the normal case and still names the target
+    var r2 = exEv({ event_type:"tool.result", event_id:"m3", tool_call_id:"tn",
+                    tool_name:"Read", timestamp:T1 });
+    var c2 = exEv({ event_type:"file.read", event_id:"m4", tool_call_id:"tn",
+                    tool_name:"Read", file_path:"/etc/hosts", timestamp:T0 });
+    ok("agreeing tool names still name the target",
+       /\/etc\/hosts/.test(explain(r2, buildIndex([c2, r2])).what));
+  })();
+
+  /* A counterpart in a different session is not this record's counterpart.
+     eventIndex() is built over every record in the file, never the filtered
+     view, so without this a record planted in another session supplies the
+     headline's target — and it survives narrowing to the victim's session. */
+  (function(){
+    var atk = exEv({ event_type:"file.read", event_id:"x-atk", tool_call_id:"tS",
+                     tool_name:"Read", file_path:"/tmp/attacker-owned.txt",
+                     session_id:"sess-ATTACKER", timestamp:T0 });
+    var vic = exEv({ event_type:"tool.result", event_id:"x-vic", tool_call_id:"tS",
+                     tool_name:"Read", session_id:"sess-VICTIM", timestamp:T1 });
+    var xe = explain(vic, buildIndex([atk, vic]));
+    ok("a cross-session record never supplies the target",
+       !/attacker-owned/.test(xe.what), xe.what);
+    ok("a cross-session record is not reported as the pair",
+       !/A matching|result of a matching/.test(xe.next.text), xe.next.text);
+    // same session still pairs
+    var ok2 = exEv({ event_type:"file.read", event_id:"x-ok", tool_call_id:"tU",
+                     tool_name:"Read", file_path:"/tmp/real.txt",
+                     session_id:"sess-VICTIM", timestamp:T0 });
+    var vic2 = exEv({ event_type:"tool.result", event_id:"x-v2", tool_call_id:"tU",
+                      tool_name:"Read", session_id:"sess-VICTIM", timestamp:T1 });
+    ok("a same-session record still pairs",
+       /\/tmp\/real\.txt/.test(explain(vic2, buildIndex([ok2, vic2])).what));
+  })();
+
+  /* Bidi and zero-width characters survive into a headline that quotes another
+     record's path. U+202E renders "/tmp/exe.png" for "/tmp/gnp.exe". */
+  (function(){
+    var c = exEv({ event_type:"file.read", event_id:"b1", tool_call_id:"tb",
+                   tool_name:"Read", file_path:"/tmp/\u202Egnp.exe", timestamp:T0 });
+    var r = exEv({ event_type:"tool.result", event_id:"b2", tool_call_id:"tb",
+                   tool_name:"Read", timestamp:T1 });
+    var bw = explain(r, buildIndex([c, r])).what;
+    ok("a bidi override never reaches the headline", bw.indexOf("\u202E") === -1, JSON.stringify(bw));
+    ok("a zero-width character never reaches the headline",
+       !/[\u200B-\u200F\u2066-\u2069]/.test(
+         explain(exEv({ event_type:"file.read", file_path:"/a/\u200Bb.js" }), NOIDX).what));
+    ok("the visible path survives the strip", /gnp\.exe/.test(bw), bw);
+    /* Tab, newline and CR are control characters too, and stripping them
+       BEFORE the whitespace collapse joined the words either side. All four
+       blocks render record text, so all four are checked. */
+    eq("a newline still separates words in describe()",
+       describe({ record_type:"event", event_type:"command.exec", command:"npm test\n--watch" }),
+       "Proposed a shell command: npm test --watch");
+    eq("a newline still separates words in explain()",
+       explain(exEv({ event_type:"file.read", file_path:"/a\tb/c.js" }), NOIDX).what,
+       "The agent asked to read /a b/c.js.");
+    ok("a NUL still joins, because it is not whitespace",
+       /ab/.test(describe({ record_type:"event", event_type:"command.exec", command:"a\u0000b" })));
+  })();
+
+  // The cap must bound the WORK, not only the output: exClean scanned a 40 MB
+  // value before anything truncated it.
+  (function(){
+    var huge = new Array(4 * 1024 * 1024).join("x") + "/tail.js";
+    var c = exEv({ event_type:"file.read", event_id:"h1", tool_call_id:"th",
+                   tool_name:"Read", file_path:huge, timestamp:T0 });
+    var r = exEv({ event_type:"tool.result", event_id:"h2", tool_call_id:"th",
+                   tool_name:"Read", timestamp:T1 });
+    var idx = buildIndex([c, r]);
+    var t0 = Date.now(); var hw = explain(r, idx).what; var ms = Date.now() - t0;
+    ok("a huge paired path does not dominate the render (" + ms + "ms)", ms < 120, ms + "ms");
+    ok("a huge paired path still yields a bounded headline", hw.length < 200, hw.length);
+    /* The timing above is a smoke test and passes even uncapped on a fast
+       machine, so the invariant is asserted structurally too: every one of the
+       four blocks bounds the input before it scans it. */
+    eq("all four render blocks bound the input before scanning",
+       (HTML.match(/length > 4096/g) || []).length, 4);
+  })();
+
+  /* subagent attribution was suppressed by a bare substring test against the
+     rendered headline — a sub_agent of "a", "tool", or the mate's tool name
+     matched almost anything, dropping the sentence that introduces the very
+     subagent the next clause talks about. */
+  (function(){
+    ["a", "tool", "Read", "The"].forEach(function(nm){
+      var c = exEv({ event_type:"file.read", event_id:"s1"+nm, tool_call_id:"ts"+nm,
+                     tool_name:"Read", file_path:"/a/b.js", timestamp:T0 });
+      var r = exEv({ event_type:"tool.result", event_id:"s2"+nm, tool_call_id:"ts"+nm,
+                     tool_name:"Read", sub_agent:nm, timestamp:T1 });
+      var lm = explain(r, buildIndex([c, r])).limits.join(" ");
+      ok("sub_agent " + JSON.stringify(nm) + " is still introduced",
+         /This record was produced by/.test(lm), lm);
+    });
+    // and a headline that DOES name the subagent must not introduce it twice
+    var fr = explain(exEv({ event_type:"file.read", event_id:"s9", file_path:"/a/b.js",
+                            sub_agent:"Explore" }), NOIDX).limits.join(" ");
+    ok("a headline that names the subagent does not repeat the introduction",
+       !/This record was produced by/.test(fr), fr);
   })();
 
   eq("a result with no pair at all still names the tool",
@@ -2427,7 +2533,18 @@ var NOIDX = buildIndex([]);
        /NOPAYLOAD\[r\.etype\][\s\S]{0,200}?class="ruline"/.test(HTML) ||
        /np\.txt/.test(HTML) && !/np\.txt[\s\S]{0,80}class="cmd/.test(HTML));
     ok("the placeholder is reachable — gated on the absence, not dead code",
-       /!cmd && r\.rt === "event" &&\s*Object\.prototype\.hasOwnProperty\.call\(NOPAYLOAD, r\.etype\)/.test(HTML));
+       /!cmd && r\.rt === "event" && typeof o\.event_type === "string" &&/.test(HTML) &&
+       /hasOwnProperty\.call\(NOPAYLOAD, o\.event_type\)/.test(HTML));
+    /* An absence claim may only be made about a record this viewer has looked
+       all the way through. The observed cascade knows eight field names; a
+       payload under any other — output, result, stdout, text — rendered "not
+       captured" with the content in the JSON inches below. */
+    ok("the absence claim is withheld when the record carries an unknown field",
+       /hasOwnProperty\.call\(META_FIELDS, pk\)/.test(HTML) && /np = null; break;/.test(HTML),
+       "unrecognised fields must suppress the no-payload claim");
+    ok("the metadata allowlist is declared", /var META_FIELDS = \{\};/.test(HTML));
+    ok("an array event_type cannot reach the gate by String() coercion",
+       /typeof o\.event_type === "string"/.test(HTML));
     var m = HTML.match(/var NOPAYLOAD = \{([\s\S]*?)\n  \};/);
     ok("the no-payload table is declared once, outside showDetail", m !== null);
     var keys = (m ? m[1].match(/"([a-z.]+)":\s*\{/g) || [] : [])
@@ -2459,12 +2576,25 @@ var NOIDX = buildIndex([]);
     ok(t[0]+" keeps the filename", /viewer-write\.test\.js/.test(w), w);
     ok(t[0]+" headline stays readable", w.length < 130, w.length+": "+w);
   });
-  // and it is the same elision describe() applies, so row and pane agree
-  var d = describe(exEv({ event_type:"file.read", file_path:deep }));
-  var x = explain(exEv({ event_type:"file.read", event_id:"q1", file_path:deep }), NOIDX).what;
-  var seg = /…\/__tests__\/viewer-write\.test\.js/;
-  ok("describe() and explain() elide a path identically",
-     seg.test(d) && seg.test(x), d + " || " + x);
+  /* exPath and dsPath are duplicated across a marker boundary, so — as with
+     the three duration functions — a table asserts they agree rather than a
+     comment claiming they do. */
+  (function(){
+    // Lifted with their blocks so each keeps its own trunc/clean helpers —
+    // which is the point: the two chains must agree end to end, not just the
+    // two outer functions.
+    var dsPath = loadBlock("describe", ["dsPath"]).dsPath;
+    var exPath = loadBlock("explain",  ["exPath"]).exPath;
+    [ "", "/", "a", "/a/b.js", "relative/path/file.txt", "/one/two/three/four.js",
+      deep, deep + "/" + deep, "/" + new Array(300).join("z") + "/end.js",
+      "no-slashes-at-all-but-quite-long-" + new Array(80).join("q"),
+      "/a/\u200Bb.js", "/tmp/\u202Egnp.exe", "  /padded/path.js  ",
+      "/trailing/slash/", "////", "/ünïcødé/pâth/文件.txt", null, undefined, 42, true
+    ].forEach(function(v){
+      eq("dsPath/exPath agree on " + JSON.stringify(String(v)).slice(0,42),
+         exPath(v), dsPath(v));
+    });
+  })();
 })();
 
 /* — defects the cold reviewers found in the new panes — */

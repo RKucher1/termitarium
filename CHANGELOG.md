@@ -103,6 +103,63 @@ headline again.
 - `describe()` said *"Agent replied"*, asserting a reply relationship no field
   on the record carries. It says *"sent a message"*, matching the pane.
 
+The security pass reported after the first push, so its confirmed findings
+landed as a follow-up. It found no XSS on any new path — polyglots in the paired
+record's `file_path`, `event_type` and `tool_name`, in text and attribute
+contexts, produced zero injected nodes, zero handlers and zero dialogs in real
+Chrome — no prototype pollution, and the network surface exactly as documented.
+What it did find was that a headline sourced from a *different* record is a new
+trust edge, and the edge was not guarded:
+
+- **A pair could cross a session boundary.** `eventIndex()` is built over every
+  record in the file, never the filtered view, and nothing compared
+  `session_id` — so a record planted in another session supplied the headline's
+  target, and it survived narrowing to the victim's session. A counterpart in
+  another session is not this record's counterpart; 0 of 3,766 groups in the
+  corpus cross one, so the gate costs nothing.
+
+- **A single planted record could forge tool *and* target.** Both came from the
+  mate with nothing marking the transfer, so the row could read *"The Bash tool
+  returned"* above a headline reading *"The Read tool returned, called on
+  /tmp/innocent.txt."* When the two names disagree the pane now declines rather
+  than resolving it silently. 0 of 1,366 real pairs disagree.
+
+- **The no-payload line claimed an absence it had not checked.** The observed
+  cascade knows eight field names; a payload under any other — `output`,
+  `result`, `stdout`, `text` — rendered *"not captured"* with the content
+  visible in the JSON inches below. That is the fabricated-absence class
+  `CLAUDE.md` names by name. The claim is now withheld unless every field on
+  the record is one the viewer recognises as metadata: a false silence costs
+  nothing, a false denial does not.
+
+- **Subagent attribution was suppressed by substring collision.** `namedSub`
+  tested `what.indexOf(subName)`, so a `sub_agent` of `"a"`, `"tool"` or the
+  mate's own tool name matched almost any headline and dropped the sentence
+  introducing the subagent the next clause then discusses. Tracked explicitly
+  now.
+
+- **Bidi and zero-width characters reached rendered text.** `U+202E` in a path
+  renders `/tmp/exe.png` for `/tmp/gnp.exe` — long-standing for a record's own
+  fields, but newly reachable *from another record*. All four render blocks
+  strip control, zero-width and bidi-override characters, and bound the input
+  before scanning it: a 40 MB path on a paired record cost ~690 ms per render
+  of a 200-byte record. Writing that strip introduced a bug the suite caught
+  immediately — removing C0 before the whitespace collapse ate newlines and
+  joined the words either side.
+
+- An `event_type` of `["tool.result"]` reached the render gate through
+  `String()` coercion while `explain()` correctly called it typeless. The gate
+  requires a string.
+
+- A comment claimed `exPath` and `dsPath` were held equal by a test that did
+  not exist. It does now — a 20-case table, like the three duration functions —
+  and it immediately failed, because hardening `exClean` without `dsClean` had
+  left `describe()` rendering bidi overrides in the row.
+
+- Three findings did not apply to the committed code: the reviewer pinned a
+  build mid-edit, before the ordering claim it flagged had been replaced and
+  while the suite was momentarily red.
+
 - A test of mine was decoration and a mutation caught it: *"no sentence is
   present on every tool.result explanation"* compared whole sections, so the
   constant hid inside a string that varied for another reason — the old headline
@@ -111,7 +168,10 @@ headline again.
   the branch replaced by `false` and with the gate widened to every event type;
   they assert the gate. Two more escaped the second round — nothing covered a
   result stamped before its call, or the `file.*` headlines' own path elision —
-  and both are covered now. Nine mutations, all caught.
+  and both are covered now. Sixteen mutations across both rounds, all caught —
+  the last two exposing a substring-collision test that never varied the
+  colliding value, and a cap asserted by a timing smoke test that passed
+  uncapped.
 
 ## 0.7.0
 

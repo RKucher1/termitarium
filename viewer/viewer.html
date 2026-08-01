@@ -769,7 +769,15 @@
     return ""; // objects and arrays never become part of a sentence
   }
   function dsTrunc(v, n){
-    var t = dsStr(v).replace(/\s+/g, " ").trim();
+    // Control, zero-width and bidi-override characters are removed, not
+    // collapsed: U+202E in a path renders "/tmp/exe.png" for "/tmp/gnp.exe".
+    // Tab/newline/CR are left for the \s collapse below, or a newline would
+    // join the words either side of it instead of separating them.
+    // Bounded before the scan so a 40 MB value is not walked to build a
+    // 58-character string. Mirrors exClean(); a test asserts they agree.
+    var raw = dsStr(v);
+    if(raw.length > 4096) raw = raw.slice(0, 4096);
+    var t = raw.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim();
     if(t.length <= n) return t;
     // Slicing between a surrogate pair leaves a lone half, which renders as
     // U+FFFD — and this runs on every row in the list.
@@ -968,7 +976,17 @@
     if(typeof v === "boolean") return String(v);
     return "";
   }
-  function ipClean(v){ return ipStr(v).replace(/\s+/g, " ").trim(); }
+  function ipClean(v){
+    // Control, zero-width and bidi-override characters are removed, not
+    // collapsed: U+202E in a path renders "/tmp/exe.png" for "/tmp/gnp.exe".
+    // Tab/newline/CR are left for the \s collapse below, or a newline would
+    // join the words either side of it instead of separating them.
+    // Bounded before the scan so a 40 MB value is not walked to build a
+    // 58-character string. Mirrors exClean(); a test asserts they agree.
+    var raw = ipStr(v);
+    if(raw.length > 4096) raw = raw.slice(0, 4096);
+    return raw.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim();
+  }
   // Collapse runs of spaces and tabs but keep line structure: a shell script
   // folded onto one line runs its arguments into its heredoc body and becomes
   // markedly harder to read than the raw record it is summarising.
@@ -1134,7 +1152,21 @@
     if(typeof v === "boolean") return String(v);
     return "";
   }
-  function exClean(v){ return exStr(v).replace(/\s+/g, " ").trim(); }
+  /* Bound the work before the scan: exTrunc's cap bounded the OUTPUT, while
+     exClean ran a global regex over the whole value first — a 40 MB file_path
+     on a paired record cost ~690 ms per render of a 200-byte tool.result.
+     4 KB is far past any cap any caller passes.
+
+     Control, zero-width and bidi-override characters are removed rather than
+     collapsed. U+202E in a path renders "/tmp/exe.png" for "/tmp/gnp.exe", and
+     since a tool.result headline now quotes a DIFFERENT record's path, that
+     text is no longer even from the record being explained. */
+  function exClean(v){
+    var t = exStr(v);
+    if(t.length > 4096) t = t.slice(0, 4096);
+    return t.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, "")
+            .replace(/\s+/g, " ").trim();
+  }
   function exTrunc(v, n){
     var t = exClean(v);
     if(t.length <= n) return t;
@@ -1344,9 +1376,13 @@
     if(!Array.isArray(list)) return null;
 
     var self = -1, others = [], i;
+    var mySid = exClean(o.session_id);
     for(i = 0; i < list.length; i++){
-      if(list[i] === o && self === -1) self = i;
-      else others.push(i);
+      if(list[i] === o && self === -1){ self = i; continue; }
+      // A counterpart in another session is not this record's counterpart.
+      var theirSid = exClean(list[i].session_id);
+      if(mySid && theirSid && mySid !== theirSid) continue;
+      others.push(i);
     }
     if(!others.length) return null;
 
@@ -1621,25 +1657,33 @@
       // as part of the sentence.
       var subName = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,60}$/.test(sub) ? sub : "";
       var who = subName ? "The " + subName + " subagent" : (sub ? "A subagent" : "The agent");
+      // Set by every branch that puts `who` in the headline, so the caveat below
+      // knows whether the subagent has been introduced.
+      var whoUsed = false;
 
       var what;
       if(et === "command.exec"){
         // "Proposed", not "ran" — on the hook path numbat sees the command
         // before it executes, and whether it executed is the result's business.
+        whoUsed = true;
         what = who + " proposed a shell command" + (tool ? " through " + tool : "") + ".";
       } else if(et === "command.result"){
         what = "numbat recorded a result for a shell command" +
                (dur !== null ? ", reporting a duration of " + exDur(dur) : "") + ".";
       } else if(et === "file.read"){
+        whoUsed = true;
         what = path ? who + " asked to read " + exPath(path) + (tool ? " using " + tool : "") + "."
                     : who + " asked to read a file.";
       } else if(et === "file.write"){
+        whoUsed = true;
         what = path ? who + " asked to write " + exPath(path) + (tool ? " using " + tool : "") + "."
                     : who + " asked to write a file.";
       } else if(et === "file.delete"){
+        whoUsed = true;
         what = path ? who + " asked to delete " + exPath(path) + (tool ? " using " + tool : "") + "."
                     : who + " asked to delete a file.";
       } else if(et === "tool.call"){
+        whoUsed = true;
         what = tool ? who + " called the " + tool + " tool." : who + " called a tool.";
       } else if(et === "tool.result"){
         /* Bounded on both sides. Drop the trailing sentence and this is
@@ -1663,7 +1707,12 @@
         var rMType = rMate ? exClean(rMate.event_type) : "";
         var rIsCall = !!(rMate && exHas(EX_CALL, rMType));
         var rSure  = !!(rIsCall && rPair && !rPair.ambiguous && !rPair.truncated);
-        var rTool  = (rSure ? exTrunc(rMate.tool_name, 40) : "") || tool;
+        // The call's tool name and this record's must agree, or the pane would
+        // describe a call no record describes and disagree with the row above
+        // it. 0 of 1,366 pairs in the reference corpus disagree.
+        var rMTool = rSure ? exTrunc(rMate.tool_name, 40) : "";
+        if(rSure && tool && rMTool && tool !== rMTool) rSure = false;
+        var rTool  = (rSure ? rMTool : "") || tool;
         var rHead  = rTool ? "The " + rTool + " tool returned" : "A tool returned";
         var rPath  = rSure ? exPath(rMate.file_path) : "";
         if(rPath)      what = rHead + ", called on " + rPath + ".";
@@ -1698,8 +1747,10 @@
       } else if(et === "prompt.user"){
         what = "The operator sent a prompt to the agent.";
       } else if(et === "message.assistant"){
+        whoUsed = true;
         what = who + " sent a message.";
       } else if(et === "permission.requested"){
+        whoUsed = true;
         what = tool ? who + " asked for approval to use the " + tool + " tool."
                     : who + " asked for approval to use a tool.";
       } else if(et){
@@ -1865,7 +1916,9 @@
          pane had introduced. Checked against the rendered headline rather than
          a list of event types, so it cannot drift. */
       if(sub){
-        var namedSub = !!(subName && what.indexOf(subName) !== -1);
+        // Tracked, not sniffed: indexOf() let a sub_agent of "a" or "tool"
+        // match any headline and suppress the very sentence that introduces it.
+        var namedSub = whoUsed && !!subName;
         limits.push((namedSub ? "" : "This record was produced by " +
                       (subName ? "the " + subName + " subagent" : "a subagent") + ". ") +
                     "numbat files subagent work under the parent's session_id, so this belongs to the session above rather than one of its own.");
@@ -1936,7 +1989,17 @@
     if(typeof v === "boolean") return String(v);
     return "";
   }
-  function ruClean(v){ return ruStr(v).replace(/\s+/g, " ").trim(); }
+  function ruClean(v){
+    // Control, zero-width and bidi-override characters are removed, not
+    // collapsed: U+202E in a path renders "/tmp/exe.png" for "/tmp/gnp.exe".
+    // Tab/newline/CR are left for the \s collapse below, or a newline would
+    // join the words either side of it instead of separating them.
+    // Bounded before the scan so a 40 MB value is not walked to build a
+    // 58-character string. Mirrors exClean(); a test asserts they agree.
+    var raw = ruStr(v);
+    if(raw.length > 4096) raw = raw.slice(0, 4096);
+    return raw.replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim();
+  }
   function ruTrunc(v, n){
     var t = ruClean(v);
     if(t.length <= n) return t;
@@ -2710,6 +2773,18 @@
   // One phrasing for a decision token, shared by the rollup and the row list.
   /* What a record of this type produces but never carries. Gated per type so a
      record that does carry a payload can never be described as lacking one. */
+  /* Every field a record may carry that is metadata rather than content. The
+     no-payload claim is withheld when a record carries anything outside this
+     set, because this viewer cannot know that an unrecognised field is empty
+     of meaning. Kept deliberately generous: a false silence costs nothing, a
+     false denial is a fabricated absence. */
+  var META_FIELDS = {};
+  ("record_type event_type event_id run_id schema_version session_id source_agent source_type " +
+   "project_path project_path_hash timestamp detected_at first_seen last_seen endpoint evidence " +
+   "actor confidence tool_name tool_call_id sub_agent tags model redacted duration_ms exit_code " +
+   "approval_required approval_decision decision command observed_command content_preview url " +
+   "value file_path observed_file_path message").split(" ").forEach(function(k){ META_FIELDS[k] = 1; });
+
   var NOPAYLOAD = {
     "tool.result":       { lbl:"output",
       txt:"not captured — numbat records that a call completed, not its content or its outcome." },
@@ -3077,8 +3152,27 @@
        and this is the slot that can deny it. Rendered as a plain line rather
        than in the .cmd box, which is reserved for text that came out of the
        file. */
-    var np = (!cmd && r.rt === "event" &&
-              Object.prototype.hasOwnProperty.call(NOPAYLOAD, r.etype)) ? NOPAYLOAD[r.etype] : null;
+    /* "not captured" is an absence claim, so it may only be made about a record
+       this viewer has actually looked all the way through. The observed cascade
+       checks eight known field names; a payload under any other name — output,
+       result, stdout, text — would have rendered "not captured" with the
+       content visible in the JSON inches below. That is the fabricated absence
+       CLAUDE.md names, so the claim is now withheld unless every field on the
+       record is one this viewer recognises as metadata. */
+    var np = null;
+    if(!cmd && r.rt === "event" && typeof o.event_type === "string" &&
+       Object.prototype.hasOwnProperty.call(NOPAYLOAD, o.event_type)){
+      np = NOPAYLOAD[o.event_type];
+      for(var pk in o){
+        if(!Object.prototype.hasOwnProperty.call(o, pk)) continue;
+        if(Object.prototype.hasOwnProperty.call(META_FIELDS, pk)) continue;
+        var pv = o[pk];
+        // Anything unrecognised that actually holds something: say nothing
+        // rather than deny it.
+        if(pv !== null && pv !== undefined && pv !== "" &&
+           (typeof pv !== "object" || (Array.isArray(pv) ? pv.length : true))){ np = null; break; }
+      }
+    }
     if(np) h+='<span class="lbl">'+esc(np.lbl)+'</span><div class="ruline">'+esc(np.txt)+'</div>';
     if(cmd){
       // Bounded like every other record-derived render path: this is fed
